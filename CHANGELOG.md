@@ -5,6 +5,28 @@ All notable changes to homebridge-dahua-ultimate will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-02-15
+
+### Fixed
+- **Critical**: Snapshot channel indexing corrected to 1-based (same as RTSP)
+  - Previously used 0-based indexing causing wrong camera snapshots
+  - Example: Side view (channel 5) was getting Garage view (channel 4) snapshot
+  - Now correctly maps: D1→channel=1, D2→channel=2, D3→channel=3, etc.
+  - Fixed in both `buildFfmpegStillSource()` and `buildStillImageUrl()` methods
+
+### Changed
+- **License**: Updated from MIT to PERSONAL-USE LICENSE
+  - Personal, non-commercial use is free
+  - Commercial use requires paid license from author
+  - See LICENSE file for complete terms
+- **README**: Added Homebridge Verified badge
+- **README**: Updated with new licensing information
+
+### Technical Details
+- Removed `apiChannel = channelId - 1` conversion in snapshot URL builders
+- Snapshot API now uses `channel=${channelId}` directly (1-based)
+- Updated code comments to reflect correct indexing behavior
+
 ## [1.1.1] - 2026-02-15
 
 ### Fixed
