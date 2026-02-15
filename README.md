@@ -400,4 +400,4 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file for details
+PERSONAL‑USE LICENSE AGREEMENT - See [LICENSE](LICENSE) file for details
