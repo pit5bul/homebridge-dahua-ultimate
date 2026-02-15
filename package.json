@@ -1,7 +1,7 @@
 {
   "name": "homebridge-dahua-ultimate",
-  "version": "1.1.0",
-  "description": "Homebridge plugin for Dahua NVR cameras with ISAPI discovery, motion detection, and FFmpeg streaming",
+  "version": "1.1.1",
+  "description": "Homebridge plugin for Dahua NVR cameras with CGI API discovery, motion detection, and FFmpeg streaming",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -16,7 +16,7 @@
     "nvr",
     "camera",
     "ffmpeg",
-    "isapi",
+    "cgi-api",
     "rtsp",
     "motion-detection",
     "homekit"

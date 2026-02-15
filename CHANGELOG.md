@@ -5,6 +5,28 @@ All notable changes to homebridge-dahua-ultimate will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-02-15
+
+### Fixed
+- **Critical**: Smart discovery `enabled` flag now properly applied to new cameras
+  - Previously, cameras with default names were still enabled despite detection
+  - `createCameraConfig()` was ignoring the `enabled` parameter from discovery
+  - Now correctly creates cameras with `enabled: false` for default-named channels
+  - Example: "Channel6", "Channel7", "Channel8" now properly disabled on first discovery
+
+### Changed
+- **Documentation**: Removed incorrect ISAPI references (Hikvision-specific)
+  - Updated package.json description: "ISAPI discovery" → "CGI API discovery"
+  - Updated package.json keywords: "isapi" → "cgi-api"
+  - Fixed log message: "from ISAPI" → "from CGI API"
+  - Note: ISAPI is Hikvision's API; Dahua uses CGI API
+
+### Technical Details
+- Updated `createCameraConfig()` method signature to accept `enabled` parameter
+- Modified call site to pass `channel.enabled` from discovery results
+- No changes to discovery logic itself (was already correct)
+- Corrected all API terminology to reflect Dahua CGI API usage
+
 ## [1.1.0] - 2026-02-15
 
 ### 🎉 Major Release - Production Ready

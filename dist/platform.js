@@ -215,7 +215,7 @@ class DahuaPlatform {
                         updated = true;
                     }
                     if (updated) {
-                        this.log.info(`📝 Auto-populated camera info for ${existing.name} from ISAPI`);
+                        this.log.info(`📝 Auto-populated camera info for ${existing.name} from CGI API`);
                     }
                 }
                 result.push(existing);
@@ -223,7 +223,7 @@ class DahuaPlatform {
             }
             else {
                 const streamType = this.platformConfig.streamType || settings_1.DEFAULT_PLATFORM_CONFIG.streamType;
-                const newCamera = this.createCameraConfig(channel.id, channel.name, streamType, channel.deviceInfo);
+                const newCamera = this.createCameraConfig(channel.id, channel.name, streamType, channel.deviceInfo, channel.enabled);
                 this.log.info(`Discovered new camera: ${newCamera.name} (Channel ${channel.id})`);
                 result.push(newCamera);
             }
@@ -234,7 +234,7 @@ class DahuaPlatform {
         }
         return result;
     }
-    createCameraConfig(channelId, name, streamType, deviceInfo) {
+    createCameraConfig(channelId, name, streamType, deviceInfo, enabled = true) {
         if (!this.discovery)
             throw new Error('Discovery not initialized');
         const source = this.discovery.buildFfmpegSource(channelId, streamType);
@@ -254,7 +254,7 @@ class DahuaPlatform {
             motion: settings_1.DEFAULT_CAMERA_CONFIG.motion,
             motionTimeout: settings_1.DEFAULT_CAMERA_CONFIG.motionTimeout,
             unbridge: settings_1.DEFAULT_CAMERA_CONFIG.unbridge,
-            enabled: settings_1.DEFAULT_CAMERA_CONFIG.enabled,
+            enabled: enabled, // Use the passed enabled flag from discovery
             videoConfig: {
                 source,
                 stillImageSource,

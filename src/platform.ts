@@ -242,7 +242,7 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
           }
           
           if (updated) {
-            this.log.info(`📝 Auto-populated camera info for ${existing.name} from ISAPI`);
+            this.log.info(`📝 Auto-populated camera info for ${existing.name} from CGI API`);
           }
         }
         
@@ -250,7 +250,7 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
         existingByChannelId.delete(channel.id);
       } else {
         const streamType = this.platformConfig.streamType || DEFAULT_PLATFORM_CONFIG.streamType;
-        const newCamera = this.createCameraConfig(channel.id, channel.name, streamType, channel.deviceInfo);
+        const newCamera = this.createCameraConfig(channel.id, channel.name, streamType, channel.deviceInfo, channel.enabled);
         this.log.info(`Discovered new camera: ${newCamera.name} (Channel ${channel.id})`);
         result.push(newCamera);
       }
@@ -269,6 +269,7 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
     name: string, 
     streamType: StreamType,
     deviceInfo?: { manufacturer?: string; model?: string; serialNumber?: string; firmwareVersion?: string },
+    enabled: boolean = true,
   ): CameraConfig {
     if (!this.discovery) throw new Error('Discovery not initialized');
 
@@ -291,7 +292,7 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
       motion: DEFAULT_CAMERA_CONFIG.motion,
       motionTimeout: DEFAULT_CAMERA_CONFIG.motionTimeout,
       unbridge: DEFAULT_CAMERA_CONFIG.unbridge,
-      enabled: DEFAULT_CAMERA_CONFIG.enabled,
+      enabled: enabled, // Use the passed enabled flag from discovery
       videoConfig: {
         source,
         stillImageSource,
