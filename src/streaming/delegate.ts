@@ -54,10 +54,7 @@ interface ResolutionInfo {
 }
 
 // Snapshot queue entry
-interface SnapshotQueueEntry {
-  request: SnapshotRequest;
-  callback: SnapshotRequestCallback;
-}
+
 
 export class StreamingDelegate implements CameraStreamingDelegate {
   private readonly hap: HAP;
@@ -68,9 +65,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
   private cachedSnapshot?: Buffer;
   private cachedSnapshotTime = 0;
 
-  // FIX: Snapshot queue - prevents concurrent NVR snapshot requests overwhelming the device
-  private snapshotQueue: SnapshotQueueEntry[] = [];
-  private snapshotInProgress = false;
+
 
   constructor(
     hap: HAP,
@@ -184,12 +179,10 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     return resInfo;
   }
 
-  // FIX: Queue-based snapshot handler - serialises requests per camera to avoid NVR overload
   async handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): Promise<void> {
     const resolution = this.determineResolution(request, true);
     this.log.info(`Snapshot request: ${request.width}x${request.height} -> ${resolution.width}x${resolution.height}`, this.cameraConfig.name);
 
-    // Return cached snapshot if fresh (within 5 seconds)
     const now = Date.now();
     if (this.cachedSnapshot && now - this.cachedSnapshotTime < 5000) {
       this.log.debug('Returning cached snapshot', this.cameraConfig.name);
@@ -197,97 +190,54 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       return;
     }
 
-    // Queue this request
-    this.snapshotQueue.push({ request, callback });
-    this.processSnapshotQueue();
-  }
-
-  private processSnapshotQueue(): void {
-    if (this.snapshotInProgress || this.snapshotQueue.length === 0) {
+    const source = this.videoConfig.stillImageSource || this.videoConfig.source;
+    if (!source) {
+      this.log.error('No source configured', this.cameraConfig.name);
+      callback(new Error('No source configured'));
       return;
     }
 
-    this.snapshotInProgress = true;
-    const entry = this.snapshotQueue.shift()!;
-    this.executeSnapshot(entry.request, entry.callback).finally(() => {
-      this.snapshotInProgress = false;
-      this.processSnapshotQueue();
-    });
-  }
+    const sourceArgs = source.split(/\s+/);
+    const isHttps = source.includes('https://');
+    const timeoutArgs = isHttps ? ['-timeout', '8000000'] : [];
 
-  private executeSnapshot(request: SnapshotRequest, callback: SnapshotRequestCallback): Promise<void> {
-    return new Promise((resolve) => {
-      const resolution = this.determineResolution(request, true);
+    const ffmpegArgs: string[] = ['-hide_banner', ...timeoutArgs, ...sourceArgs, '-frames:v', '1'];
+    if (resolution.videoFilter) ffmpegArgs.push('-vf', resolution.videoFilter);
+    ffmpegArgs.push('-f', 'image2', '-');
 
-      const source = this.videoConfig.stillImageSource || this.videoConfig.source;
-      if (!source) {
-        this.log.error('No source configured', this.cameraConfig.name);
-        callback(new Error('No source configured'));
-        resolve();
+    this.log.debug(`Snapshot command: ${this.videoProcessor} ${ffmpegArgs.join(' ')}`, this.cameraConfig.name);
+    const ffmpeg = spawn(this.videoProcessor, ffmpegArgs, { env: process.env });
+    const chunks: Buffer[] = [];
+    let error = '';
+
+    ffmpeg.stdout.on('data', (data: Buffer) => chunks.push(data));
+    ffmpeg.stderr.on('data', (data: Buffer) => { error += data.toString(); });
+    ffmpeg.on('error', (err) => { this.log.error(`Snapshot error: ${err.message}`, this.cameraConfig.name); callback(err); });
+    ffmpeg.on('close', (code) => {
+      if (code !== 0) {
+        this.log.error(`Snapshot FFmpeg exited with code ${code}`, this.cameraConfig.name);
+        if (this.videoConfig.debug) this.log.debug(`FFmpeg stderr: ${error}`, this.cameraConfig.name);
+        callback(new Error(`FFmpeg exited with code ${code}`));
         return;
       }
-
-      // FIX: Add -timeout flag for HTTPS snapshot sources to fail faster on dead cameras
-      const sourceArgs = source.split(/\s+/);
-      const isHttps = source.includes('https://');
-      const timeoutArgs = isHttps ? ['-timeout', '8000000'] : []; // 8s in microseconds
-
-      const ffmpegArgs: string[] = ['-hide_banner', ...timeoutArgs, ...sourceArgs, '-frames:v', '1'];
-      if (resolution.videoFilter) ffmpegArgs.push('-vf', resolution.videoFilter);
-      ffmpegArgs.push('-f', 'image2', '-');
-
-      this.log.debug(`Snapshot command: ${this.videoProcessor} ${ffmpegArgs.join(' ')}`, this.cameraConfig.name);
-      const ffmpeg = spawn(this.videoProcessor, ffmpegArgs, { env: process.env });
-      const chunks: Buffer[] = [];
-      let error = '';
-      let done = false;
-
-      const finish = (err?: Error, data?: Buffer) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        if (err) {
-          callback(err);
-        } else {
-          callback(undefined, data);
-        }
-        resolve();
-      };
-
-      ffmpeg.stdout.on('data', (data: Buffer) => chunks.push(data));
-      ffmpeg.stderr.on('data', (data: Buffer) => { error += data.toString(); });
-      ffmpeg.on('error', (err) => {
-        this.log.error(`Snapshot error: ${err.message}`, this.cameraConfig.name);
-        finish(err);
-      });
-      ffmpeg.on('close', (code) => {
-        if (code !== 0) {
-          this.log.error(`Snapshot FFmpeg exited with code ${code}`, this.cameraConfig.name);
-          if (this.videoConfig.debug) this.log.debug(`FFmpeg stderr: ${error}`, this.cameraConfig.name);
-          finish(new Error(`FFmpeg exited with code ${code}`));
-          return;
-        }
-        const snapshot = Buffer.concat(chunks);
-        if (snapshot.length === 0) {
-          this.log.error('Empty snapshot received', this.cameraConfig.name);
-          finish(new Error('Empty snapshot'));
-          return;
-        }
-        this.cachedSnapshot = snapshot;
-        this.cachedSnapshotTime = Date.now();
-        this.log.debug(`Snapshot captured: ${snapshot.length} bytes`, this.cameraConfig.name);
-        finish(undefined, snapshot);
-      });
-
-      // FIX: Increased timeout to 15s to accommodate slow NVR responses
-      const timer = setTimeout(() => {
-        if (!ffmpeg.killed) {
-          ffmpeg.kill('SIGKILL');
-          this.log.warn('Snapshot timeout', this.cameraConfig.name);
-        }
-        finish(new Error('Snapshot timeout'));
-      }, 15000);
+      const snapshot = Buffer.concat(chunks);
+      if (snapshot.length === 0) {
+        this.log.error('Empty snapshot received', this.cameraConfig.name);
+        callback(new Error('Empty snapshot'));
+        return;
+      }
+      this.cachedSnapshot = snapshot;
+      this.cachedSnapshotTime = Date.now();
+      this.log.debug(`Snapshot captured: ${snapshot.length} bytes`, this.cameraConfig.name);
+      callback(undefined, snapshot);
     });
+
+    setTimeout(() => {
+      if (!ffmpeg.killed) {
+        ffmpeg.kill('SIGKILL');
+        this.log.warn('Snapshot timeout', this.cameraConfig.name);
+      }
+    }, 15000);
   }
 
   async prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): Promise<void> {
@@ -664,3 +614,4 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
   }
 }
+
