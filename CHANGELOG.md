@@ -5,6 +5,18 @@ All notable changes to homebridge-dahua-ultimate will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-06-05
+
+### Fixed
+- **Snapshot queue**: Snapshot requests are now serialised per camera using an internal queue, preventing concurrent HTTPS requests from overwhelming the NVR. Previously, opening the Home app triggered simultaneous snapshot requests for all cameras which caused timeouts and slow thumbnail loading.
+- **Snapshot timeout**: Increased snapshot timeout from 10s to 15s to accommodate slower NVR responses, particularly on HTTPS connections.
+- **Snapshot connection timeout**: Added `-timeout 8000000` (8 seconds in microseconds) to FFmpeg HTTPS snapshot commands so dead/offline cameras fail fast instead of hanging until the process timeout fires.
+- **Audio quality**: Added `-af aresample=resampler=soxr` to the audio transcoding pipeline, enabling high-quality resampling when converting NVR audio to HomeKit's AAC-ELD format. Improves audio clarity noticeably on all cameras.
+- **Snapshot cache extended**: Increased snapshot cache TTL from 3 seconds to 5 seconds to further reduce NVR load during rapid Home app refreshes.
+
+### Changed
+- Audio log now includes negotiated sample rate and bitrate for easier debugging (e.g. `Audio enabled: AAC-eld 16kHz 24kbps`)
+
 ## [1.1.2] - 2026-02-15
 
 ### Fixed
@@ -222,3 +234,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
