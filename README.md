@@ -38,9 +38,10 @@ Homebridge plugin for Dahua NVR cameras with **automatic discovery**, motion det
 - **V4L2** - Raspberry Pi 4+
 
 ### 📸 Fast Snapshots
-- CGI-based snapshots (instant response)
-- No video decoding required
-- Optimized for HomeKit responsiveness
+- CGI-based snapshots via NVR HTTP/HTTPS API
+- **Serialised snapshot queue** — requests are queued per camera, preventing NVR overload when multiple cameras are refreshed simultaneously
+- 5-second snapshot cache reduces redundant NVR requests
+- Fast-fail on offline cameras (8s connection timeout)
 - Automatic HTTPS/HTTP detection
 
 ### 🎥 HomeKit Secure Video (HKSV)
@@ -402,3 +403,4 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
 ## License
 
 PERSONAL‑USE LICENSE AGREEMENT - See [LICENSE](LICENSE) file for details
+
