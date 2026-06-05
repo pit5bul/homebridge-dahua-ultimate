@@ -5,6 +5,15 @@ All notable changes to homebridge-dahua-ultimate will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-06-05
+
+### Added
+- **`copyAudio` config option** — allows passing the audio stream directly to HomeKit without transcoding. Useful if your camera outputs a HomeKit-compatible codec (AAC-ELD or Opus). For cameras outputting G.711/PCM (most Dahua NVRs), transcoding is still required — leave this disabled.
+
+### Changed
+- Audio log now indicates copy mode when enabled (e.g. `Audio enabled: AAC-eld 16kHz 24kbps (copy)`)
+- soxr resampler filter is skipped when `copyAudio` is enabled (no transcoding = no resampling needed)
+
 ## [1.1.3] - 2026-06-05
 
 ### Fixed
