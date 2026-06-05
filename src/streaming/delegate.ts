@@ -408,9 +408,10 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     if (this.videoConfig.audio) {
       const audioCodecName = 'audio' in request && request.audio.codec === AudioStreamingCodecType.OPUS ? 'OPUS' : 
                              'audio' in request && request.audio.codec === AudioStreamingCodecType.AAC_ELD ? 'AAC-eld' : 'unknown';
-      // FIX: Log actual negotiated audio parameters for visibility
+      // Log actual negotiated audio parameters for visibility
       if ('audio' in request) {
-        this.log.info(`Audio enabled: ${audioCodecName} ${request.audio.sample_rate}kHz ${request.audio.max_bit_rate}kbps`, this.cameraConfig.name);
+        const copyMode = this.videoConfig.copyAudio ? ' (copy)' : '';
+        this.log.info(`Audio enabled: ${audioCodecName} ${request.audio.sample_rate}kHz ${request.audio.max_bit_rate}kbps${copyMode}`, this.cameraConfig.name);
       } else {
         this.log.info(`Audio enabled: ${audioCodecName}`, this.cameraConfig.name);
       }
@@ -605,20 +606,23 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     // Audio (if enabled)
     if (this.videoConfig.audio && 'audio' in request) {
       if (request.audio.codec === AudioStreamingCodecType.OPUS || request.audio.codec === AudioStreamingCodecType.AAC_ELD) {
-        // FIX: Use soxr high-quality resampler for better audio quality when transcoding
-        const audioFilter = ' -af aresample=resampler=soxr';
+        const useAudioCopy = this.videoConfig.copyAudio === true;
+        // Only apply soxr resampler when transcoding (not copying)
+        const audioFilter = useAudioCopy ? '' : ' -af aresample=resampler=soxr';
 
         ffmpegArgs // Audio
           += `${(this.videoConfig.mapaudio ? ` -map ${this.videoConfig.mapaudio}` : ' -vn -sn -dn')
-          + (request.audio.codec === AudioStreamingCodecType.OPUS
-            ? ' -codec:a libopus'
-            + ' -application lowdelay'
-            : ' -codec:a libfdk_aac'
-              + ' -profile:a aac_eld')
+          + (useAudioCopy
+            ? ' -codec:a copy'
+            : request.audio.codec === AudioStreamingCodecType.OPUS
+              ? ' -codec:a libopus'
+              + ' -application lowdelay'
+              : ' -codec:a libfdk_aac'
+                + ' -profile:a aac_eld')
           }${audioFilter
           } -flags +global_header`
           + ` -f null`
-          + ` -ar ${request.audio.sample_rate}k`
+          + (useAudioCopy ? '' : ` -ar ${request.audio.sample_rate}k`)
           + ` -b:a ${request.audio.max_bit_rate}k`
           + ` -ac ${request.audio.channel
           } -payload_type ${'pt' in request.audio ? request.audio.pt : 110}`;
