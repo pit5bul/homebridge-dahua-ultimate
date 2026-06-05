@@ -110,6 +110,7 @@ export interface VideoConfig {
 
   // Audio
   audio?: boolean;
+  copyAudio?: boolean;
 
   // Stream mapping
   mapvideo?: string;
@@ -199,3 +200,4 @@ export interface FfprobeFormat {
   size?: string;
   bit_rate?: string;
 }
+
