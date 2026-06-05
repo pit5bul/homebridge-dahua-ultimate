@@ -393,6 +393,12 @@
                   "default": true,
                   "description": "Enable audio streaming. HomeKit will automatically choose Opus or AAC-ELD codec based on device compatibility."
                 },
+                "copyAudio": {
+                  "title": "Copy Audio (No Transcoding)",
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Pass audio stream directly to HomeKit without transcoding. Only enable if your camera already outputs a HomeKit-compatible audio codec (AAC-ELD or Opus). Most cameras output G.711/PCM which requires transcoding — enabling this on an incompatible source will result in no audio."
+                },
                 "recording": {
                   "title": "Enable HomeKit Secure Video (HKSV)",
                   "type": "boolean",
