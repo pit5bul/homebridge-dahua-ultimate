@@ -179,7 +179,7 @@ export class DahuaDiscovery {
   /**
    * Build still image URL for a channel
    */
-  buildStillImageUrl(channelId: number, streamType: StreamType = "mainstream"): string {
+  buildStillImageUrl(channelId: number, _streamType: StreamType = "mainstream"): string {
     // Dahua snapshot API uses 1-based channel indexing (same as RTSP)
     // Auto-detect HTTPS if port is 443
     const protocol = (this.port === 443 || this.secure) ? 'https' : 'http';
@@ -197,7 +197,7 @@ export class DahuaDiscovery {
   /**
    * Build FFmpeg still image source string for a channel
    */
-  buildFfmpegStillSource(channelId: number, streamType: StreamType = "mainstream"): string {
+  buildFfmpegStillSource(channelId: number, _streamType: StreamType = "mainstream"): string {
     // Dahua snapshot API uses 1-based channel indexing (same as RTSP)
     // D1 = channel=1, D2 = channel=2, etc.
     
@@ -211,3 +211,4 @@ export class DahuaDiscovery {
     return `-i ${snapshotUrl}`;
   }
 }
+
