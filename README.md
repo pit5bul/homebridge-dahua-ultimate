@@ -15,6 +15,11 @@ Homebridge plugin for Dahua NVR cameras with **automatic discovery**, motion det
 - Auto-generates optimal RTSP URLs for each camera
 - Saves discovered cameras to config.json automatically
 
+### ⚡ Instant Stream Start
+- **`qualityPreset` option** eliminates HomeKit's adaptive probe/RECONFIGURE cycle — streams start immediately at full quality with no restart
+- Without a preset, HomeKit starts every stream at 640x360/132kbps, then tears it down and restarts at the correct resolution — causing 20-40 second delays
+- Set `qualityPreset` to match your NVR substream: `480p-standard`, `720p-standard`, `1080p-standard`, or `1080p-hq`
+
 ### 📹 High-Quality Streaming
 - 1080p @ 30fps streaming to HomeKit
 - Hardware acceleration support (reduces CPU usage by 75-87% with VAAPI)
@@ -39,7 +44,7 @@ Homebridge plugin for Dahua NVR cameras with **automatic discovery**, motion det
 
 ### 📸 Fast Snapshots
 - CGI-based snapshots via NVR HTTP/HTTPS API
-- **Serialised snapshot queue** — requests are queued per camera, preventing NVR overload when multiple cameras are refreshed simultaneously
+- Concurrent snapshots — all cameras refresh thumbnails simultaneously
 - 5-second snapshot cache reduces redundant NVR requests
 - Fast-fail on offline cameras (8s connection timeout)
 - Automatic HTTPS/HTTP detection
@@ -403,4 +408,5 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
 ## License
 
 PERSONAL‑USE LICENSE AGREEMENT - See [LICENSE](LICENSE) file for details
+
 
