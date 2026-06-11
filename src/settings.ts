@@ -36,13 +36,10 @@ export const DEFAULT_VIDEO_CONFIG = {
   maxStreams: 2,
   maxWidth: HOMEKIT_MAX_WIDTH,
   maxHeight: HOMEKIT_MAX_HEIGHT,
-  maxBitrate: 2000, // 2Mbps for better quality
-  minBitrate: 300,
+  maxBitrate: 2000,
   encoder: 'software' as const,
   audio: true,
   packetSize: 1316,
-  mapvideo: undefined, // Let FFmpeg auto-map unless specified
-  mapaudio: undefined, // Let FFmpeg auto-map unless specified
   debug: false,
   debugReturn: false,
   vflip: false,
@@ -99,4 +96,5 @@ export const MOTION_EVENT_TYPES = [
   'regionExiting',  // Region Exiting
   'shelteralarm',   // Video Tampering
 ];
+
 
