@@ -35,6 +35,16 @@ export interface CameraConfig {
   unbridge?: boolean;
   enabled?: boolean;
   videoConfig?: VideoConfig;
+
+  // Populated at runtime by ffprobe (not user-configurable)
+  detected?: {
+    videoCodec?: string;
+    width?: number;
+    height?: number;
+    fps?: number;
+    audioCodec?: string;
+    probedAt?: string;
+  };
 }
 
 export interface VideoConfig {
@@ -50,6 +60,10 @@ export interface VideoConfig {
 
   // Bitrate limits
   maxBitrate?: number;
+
+  // Resolution limits (set internally from qualityPreset, not exposed in UI)
+  maxWidth?: number;
+  maxHeight?: number;
 
   // Codec and Hardware Acceleration
   vcodec?: string;               // Auto-derived from encoder, can be overridden
