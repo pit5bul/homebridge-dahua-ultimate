@@ -19,6 +19,7 @@ import {
   DEFAULT_VIDEO_CONFIG,
   HOMEKIT_MAX_WIDTH,
   HOMEKIT_MAX_HEIGHT,
+  QUALITY_PRESETS,
 } from '../settings';
 import { pickPort } from 'pick-port';
 
@@ -85,28 +86,13 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     const maxWidth = Math.min(this.videoConfig.maxWidth || HOMEKIT_MAX_WIDTH, HOMEKIT_MAX_WIDTH);
     const maxHeight = Math.min(this.videoConfig.maxHeight || HOMEKIT_MAX_HEIGHT, HOMEKIT_MAX_HEIGHT);
 
-    // Handle resolution mode - override HomeKit's request if configured
-    const resolutionMode = this.videoConfig.resolutionMode || 'adaptive';
-    
-    if (!isSnapshot && resolutionMode !== 'adaptive') {
-      if (resolutionMode === 'force-max') {
-        // Force maximum resolution
-        this.log.info(`[Resolution] Force-Max mode: Using ${maxWidth}x${maxHeight} (HomeKit requested ${request.width}x${request.height})`, this.cameraConfig.name);
-        requestedWidth = maxWidth;
-        requestedHeight = maxHeight;
-      } else if (resolutionMode === 'force-custom') {
-        // Force custom resolution
-        const customWidth = this.videoConfig.customWidth;
-        const customHeight = this.videoConfig.customHeight;
-        
-        if (customWidth && customHeight) {
-          this.log.info(`[Resolution] Force-Custom mode: Using ${customWidth}x${customHeight} (HomeKit requested ${request.width}x${request.height})`, this.cameraConfig.name);
-          requestedWidth = customWidth;
-          requestedHeight = customHeight;
-        } else {
-          this.log.error(`[Resolution] Force-Custom mode selected but customWidth/customHeight not set! Falling back to adaptive.`, this.cameraConfig.name);
-        }
-      }
+    // qualityPreset acts as a resolution floor for streaming.
+    // HomeKit always starts with a low-resolution probe (640x360) before sending RECONFIGURE.
+    // By forcing the preset resolution from the first request, we eliminate the RECONFIGURE
+    // cycle and the double stream start it causes.
+    if (!isSnapshot && this.videoConfig.qualityPreset) {
+      requestedWidth = maxWidth;
+      requestedHeight = maxHeight;
     }
 
     if (requestedWidth > maxWidth) requestedWidth = maxWidth;
@@ -279,8 +265,10 @@ export class StreamingDelegate implements CameraStreamingDelegate {
         this.startStream(request, callback);
         break;
       case StreamRequestTypes.RECONFIGURE:
+        // qualityPreset forces the start resolution so RECONFIGURE is a no-op —
+        // the stream is already at the correct resolution and bitrate from the first request.
         if ('video' in request) {
-          this.log.debug(`Reconfigure ignored: ${request.video.width}x${request.video.height}`, this.cameraConfig.name);
+          this.log.debug(`Reconfigure ignored (qualityPreset already at target): ${request.video.width}x${request.video.height}`, this.cameraConfig.name);
         }
         callback();
         break;
@@ -313,6 +301,11 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     let bitrate = request.video.max_bit_rate;
     if (this.videoConfig.maxBitrate && bitrate > this.videoConfig.maxBitrate) bitrate = this.videoConfig.maxBitrate;
     if (this.videoConfig.minBitrate && bitrate < this.videoConfig.minBitrate) bitrate = this.videoConfig.minBitrate;
+    // qualityPreset bitrate floor — prevent HomeKit's probe bitrate (~132kbps) from being used
+    if (this.videoConfig.qualityPreset) {
+      const presetBitrate = QUALITY_PRESETS[this.videoConfig.qualityPreset]?.maxBitrate;
+      if (presetBitrate && bitrate < presetBitrate) bitrate = presetBitrate;
+    }
 
     this.log.info(`Starting stream: ${resolution.width}x${resolution.height} ${bitrate}kbps`, this.cameraConfig.name);
     
@@ -614,4 +607,5 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
   }
 }
+
 
