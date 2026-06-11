@@ -5,6 +5,46 @@ All notable changes to homebridge-dahua-ultimate will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-12
+
+### Fixed
+- **Critical: FFmpeg crash on stream start** — stray single-quote characters were being injected into the FFmpeg argument string around `-an -sn -dn`, causing FFmpeg to exit immediately with `Unrecognized option 'dn''` / `Error splitting the argument list`. No streams worked in v1.1.9.
+- **Critical: Audio never streamed** — the audio output format was set to `-f null` which discards audio entirely. Changed to `-f rtp` so audio is actually sent to HomeKit.
+
+### Changed
+- **CI: Workflow now triggers on version tags only** — previously the publish workflow ran on every push to main, causing build failure emails on non-release commits. Now only `git push --tags` triggers the workflow.
+
+## [1.1.9] - 2026-06-11
+
+### Fixed
+- **20+ second stream buffering delay** — Dahua NVRs send RTSP frames with highly irregular PTS timestamps (~0.73-0.99s gaps instead of the expected 0.067s), causing FFmpeg to flood logs with `Past duration too large` warnings and buffer frames for 20+ seconds before HomeKit displayed video. Fixed by prepending `-use_wallclock_as_timestamps 1` to all RTSP source arguments, replacing NVR timestamps with system wall clock time.
+
+### Changed
+- **UI schema cleanup** — removed deprecated/unused fields (`resolutionMode`, `customWidth`, `customHeight`, `minBitrate`, `videoFilter`, `mapvideo`, `mapaudio`) from both the UI schema and codebase. Config UI X now shows only relevant options.
+
+## [1.1.8] - 2026-06-10
+
+### Added
+- **`qualityPreset` option** — eliminates HomeKit's adaptive probe/RECONFIGURE double stream start. HomeKit always begins streams at 640x360/~132kbps as an adaptive probe, then tears down and restarts at the correct resolution — causing 20-40 second delays. Setting `qualityPreset` forces the correct resolution and bitrate from the very first stream request, eliminating the restart entirely.
+
+### Available presets
+- `480p-standard` — 854x480, 500kbps (recommended for NVR substreams at 704x576)
+- `720p-standard` — 1280x720, 1500kbps
+- `1080p-standard` — 1920x1080, 2000kbps
+- `1080p-hq` — 1920x1080, 4000kbps
+
+## [1.1.7] - 2026-06-09
+
+### Fixed
+- **Snapshot queue removed** — previously snapshots were serialised through a queue, which blocked stream starts. HomeKit fires snapshot and stream callbacks on completely independent HAP callbacks, so serialising them caused streams to wait for all pending snapshots to finish first. Snapshots are now fully concurrent, which is the correct HomeKit behaviour.
+
+## [1.1.6] - 2026-06-07
+
+### Added
+- **`encoder` config option** — replaces manual `encoderOptions`/`videoFilter` approach for hardware acceleration. Set `encoder` to `vaapi`, `amf`, `quicksync`, `nvenc`, `videotoolbox`, or `v4l2`. The plugin automatically builds the correct FFmpeg pipeline including hwaccel init, filter chain, and encoder flags.
+- **`qualityProfile` option** — `speed`, `balanced`, or `quality` tuning presets per encoder type.
+- **`hwaccelDevice` option** — specify the hardware device path (e.g. `/dev/dri/renderD128` for VAAPI).
+
 ## [1.1.5] - 2026-06-06
 
 ### Fixed
@@ -25,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Snapshot queue**: Snapshot requests are now serialised per camera using an internal queue, preventing concurrent HTTPS requests from overwhelming the NVR. Previously, opening the Home app triggered simultaneous snapshot requests for all cameras which caused timeouts and slow thumbnail loading.
 - **Snapshot timeout**: Increased snapshot timeout from 10s to 15s to accommodate slower NVR responses, particularly on HTTPS connections.
 - **Snapshot connection timeout**: Added `-timeout 8000000` (8 seconds in microseconds) to FFmpeg HTTPS snapshot commands so dead/offline cameras fail fast instead of hanging until the process timeout fires.
-- **Audio quality**: Added `-af aresample=resampler=soxr` to the audio transcoding pipeline, enabling high-quality resampling when converting NVR audio to HomeKit's AAC-ELD format. Improves audio clarity noticeably on all cameras.
+- **Audio quality**: Added `-af aresample=resampler=soxr` to the audio transcoding pipeline, enabling high-quality resampling when converting NVR audio to HomeKit's AAC-ELD format.
 - **Snapshot cache extended**: Increased snapshot cache TTL from 3 seconds to 5 seconds to further reduce NVR load during rapid Home app refreshes.
 
 ### Changed
@@ -42,38 +82,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **License**: Updated from MIT to PERSONAL-USE LICENSE
-  - Personal, non-commercial use is free
-  - Commercial use requires paid license from author
-  - See LICENSE file for complete terms
 - **README**: Added Homebridge Verified badge
 - **README**: Updated with new licensing information
-
-### Technical Details
-- Removed `apiChannel = channelId - 1` conversion in snapshot URL builders
-- Snapshot API now uses `channel=${channelId}` directly (1-based)
-- Updated code comments to reflect correct indexing behavior
 
 ## [1.1.1] - 2026-02-15
 
 ### Fixed
 - **Critical**: Smart discovery `enabled` flag now properly applied to new cameras
-  - Previously, cameras with default names were still enabled despite detection
-  - `createCameraConfig()` was ignoring the `enabled` parameter from discovery
-  - Now correctly creates cameras with `enabled: false` for default-named channels
-  - Example: "Channel6", "Channel7", "Channel8" now properly disabled on first discovery
 
 ### Changed
 - **Documentation**: Removed incorrect ISAPI references (Hikvision-specific)
-  - Updated package.json description: "ISAPI discovery" → "CGI API discovery"
-  - Updated package.json keywords: "isapi" → "cgi-api"
-  - Fixed log message: "from ISAPI" → "from CGI API"
-  - Note: ISAPI is Hikvision's API; Dahua uses CGI API
-
-### Technical Details
-- Updated `createCameraConfig()` method signature to accept `enabled` parameter
-- Modified call site to pass `channel.enabled` from discovery results
-- No changes to discovery logic itself (was already correct)
-- Corrected all API terminology to reflect Dahua CGI API usage
 
 ## [1.1.0] - 2026-02-15
 
@@ -82,175 +100,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 First stable release with full Dahua NVR support and smart camera discovery.
 
 ### Added
-- **Smart Discovery Logic**: Automatically disables channels with default names (e.g., "Channel6", "Channel7")
-  - Only cameras with custom names are enabled by default
-  - Prevents unused NVR channels from appearing in HomeKit
-  - Logs which channels were auto-disabled for transparency
-- **Better Camera Information**: Auto-populates manufacturer and model fields
-  - Manufacturer: "Dahua"
-  - Model: "Dahua IP Camera"
-  - Ensures proper display in HomeKit accessory info
-- **Hardware Acceleration Documentation**: Added comprehensive FFmpeg hardware encoder notes
-  - Clear documentation that bundled FFmpeg only supports software codecs
-  - Instructions for compiling/installing FFmpeg with hardware support
-  - Examples for VAAPI, NVENC, QuickSync, VideoToolbox, V4L2
+- Smart Discovery Logic
+- Better Camera Information
+- Hardware Acceleration Documentation
 
 ### Fixed
-- **Snapshot URLs**: Fixed hardcoded HTTP port 80 to use correct protocol and port
-  - Now correctly uses HTTPS on port 443 when configured
-  - Auto-detects protocol based on port and secure flag
-  - Snapshots now work with HTTPS-enabled NVRs
-- **SSL Certificate Handling**: Self-signed certificates now properly accepted
-  - Added `rejectUnauthorized: false` for HTTPS connections
-  - No more "unable to verify certificate" errors
-- **Port 443 Auto-Detection**: Automatically enables HTTPS when port 443 is used
-  - Even if `secure: false` in config, port 443 forces HTTPS
-  - Prevents "ECONNRESET" errors from protocol mismatch
+- Snapshot URLs fixed for HTTPS
+- SSL Certificate Handling
+- Port 443 Auto-Detection
 
-### Changed
-- Improved discovery logging with clearer status messages
-- Enhanced error messages for troubleshooting
-- Discovery now logs count of enabled vs disabled channels
+## [1.0.0 - 1.0.10] - 2026-02-15
 
-### Technical Details
-- Platform: `DahuaUltimate`
-- Plugin: `homebridge-dahua-ultimate`
-- Digest authentication fully working
-- Real-time event stream for motion detection
-- RTSP URL format: `rtsp://host:554/cam/realmonitor?channel=N&subtype=0`
-- Snapshot URL format: `https://host:443/cgi-bin/snapshot.cgi?channel=N`
-
-## [1.0.10] - 2026-02-15
-
-### Fixed
-- Added port and secure parameters to discovery class
-- Snapshot URLs still using wrong port (partial fix, completed in 1.1.0)
-
-### Known Issues
-- Snapshots still failing due to incomplete fix (resolved in 1.1.0)
-
-## [1.0.9] - 2026-02-15
-
-### Added
-- Complete branding update from Hikvision to Dahua
-- New README.md with Dahua-specific documentation
-- Clean CHANGELOG.md
-- Updated config.schema.json for Homebridge UI
-
-### Changed
-- Platform name: HikvisionUltimate → DahuaUltimate
-- Default name: "Hikvision NVR" → "Dahua NVR"
-- All documentation references updated
-
-## [1.0.8] - 2026-02-15
-
-### Added
-- First working connection to Dahua NVR
-- Successful camera discovery (8 channels)
-- Motion detection working
-
-### Known Issues
-- Homebridge cache conflicts with new accessories
-
-## [1.0.7] - 2026-02-15
-
-### Added
-- Disabled SSL certificate verification for self-signed certs
-- Added `rejectUnauthorized: false` to HTTPS requests
-
-### Fixed
-- "unable to verify the first certificate" errors resolved
-
-## [1.0.6] - 2026-02-15
-
-### Added
-- Auto-detect HTTPS when port 443 is used
-- Debug logging for protocol selection
-
-### Fixed
-- Port 443 now correctly uses HTTPS protocol
-- ECONNRESET errors from protocol mismatch
-
-## [1.0.5] - 2026-02-15
-
-### Added
-- Debug logging for API requests
-- Connection info logging at startup
-- Better error messages
-
-### Changed
-- Improved error handling in makeRequest
-
-## [1.0.4] - 2026-02-15
-
-### Changed
-- Accept header: `application/xml` → `text/plain` for Dahua responses
-- Updated API endpoints for Dahua CGI format
-
-### Fixed
-- HTTP 400 errors from incorrect Accept header
-
-## [1.0.0 - 1.0.3] - 2026-02-15
-
-### Added
-- Initial Dahua NVR support
-- CGI API implementation
-- Channel discovery via configManager.cgi
-- Motion events via eventManager.cgi
-- RTSP streaming support
-- Digest authentication
-
-### Changed
-- Migrated from Hikvision ISAPI to Dahua CGI API
-- Response parser: XML → key=value text format
-- RTSP URL format updated for Dahua
-- Snapshot URL format updated for Dahua
-- Event stream format changed to text-based multipart
-
-### Technical Changes
-- API endpoints:
-  - Device info: `/cgi-bin/magicBox.cgi?action=getSystemInfo`
-  - Channels: `/cgi-bin/configManager.cgi?action=getConfig&name=Encode`
-  - Events: `/cgi-bin/eventManager.cgi?action=attach&codes=[...]`
-  - RTSP: `rtsp://host:554/cam/realmonitor?channel=N&subtype=0`
-  - Snapshots: `/cgi-bin/snapshot.cgi?channel=N`
+Initial releases — Dahua CGI API implementation, channel discovery, motion events, RTSP streaming, digest authentication. See git history for details.
 
 ## Architecture Credits
 
 This plugin is based on the architecture of homebridge-hikvision-ultimate v2.0.6, adapted for Dahua NVR compatibility using Dahua's HTTP CGI API instead of Hikvision's ISAPI.
 
-Key architectural differences:
-- API protocol: ISAPI (XML) → CGI (text/plain key=value)
-- Response parsing: xml2js → custom key=value parser
-- Channel indexing: Consistent 1-based → 0-based API, 1-based RTSP
-- Event stream: XML multipart → Text multipart with different format
-
 ## License
 
-MIT License
-
-Copyright (c) 2026 pit5bul
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-
-
-
- 
- 
+PERSONAL-USE LICENSE — See [LICENSE](LICENSE) file for details.
