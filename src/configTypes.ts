@@ -81,6 +81,11 @@ export type QualityProfile = '' | 'speed' | 'balanced' | 'quality';
 export type ResolutionMode = 'adaptive' | 'force-max' | 'force-custom';
 
 /**
+ * Quality preset — maps to fixed resolution + bitrate floor, eliminates HomeKit probe RECONFIGURE cycle
+ */
+export type QualityPreset = '480p-standard' | '720p-standard' | '1080p-standard' | '1080p-hq';
+
+/**
  * Video configuration for a camera
  */
 export interface VideoConfig {
@@ -96,7 +101,10 @@ export interface VideoConfig {
   maxBitrate?: number;
   minBitrate?: number;
 
-  // Resolution Override
+  // Quality Preset — forces resolution + bitrate floor, eliminates HomeKit RECONFIGURE cycle
+  qualityPreset?: QualityPreset;
+
+  // Resolution Override (legacy — qualityPreset preferred)
   resolutionMode?: ResolutionMode;  // How to handle HomeKit resolution requests
   customWidth?: number;             // Used when resolutionMode = 'force-custom'
   customHeight?: number;            // Used when resolutionMode = 'force-custom'
@@ -200,4 +208,5 @@ export interface FfprobeFormat {
   size?: string;
   bit_rate?: string;
 }
+
 
