@@ -16,17 +16,18 @@ export const HOMEKIT_MAX_HEIGHT = 1080;
 export const HOMEKIT_MAX_FPS = 30;
 
 /**
- * Quality preset definitions — maps user-friendly presets to concrete resolution + bitrate
- * These act as a floor, preventing HomeKit's adaptive probe from starting at 640x360/132kbps
- * and causing a double stream start (RECONFIGURE cycle).
+ * Quality preset definitions
+ * Maps user-friendly presets to concrete video parameters
  */
 export const QUALITY_PRESETS = {
-  '480p-standard':  { maxWidth: 854,  maxHeight: 480,  maxBitrate: 500 },
   '720p-standard':  { maxWidth: 1280, maxHeight: 720,  maxBitrate: 1500 },
   '1080p-standard': { maxWidth: 1920, maxHeight: 1080, maxBitrate: 2000 },
   '1080p-hq':       { maxWidth: 1920, maxHeight: 1080, maxBitrate: 4000 },
 } as const;
 
+/**
+ * Default quality preset
+ */
 export const DEFAULT_QUALITY_PRESET = '1080p-standard';
 
 /**
@@ -39,6 +40,7 @@ export const DEFAULT_VIDEO_CONFIG = {
   maxBitrate: 2000,
   encoder: 'software' as const,
   audio: true,
+  copyAudio: false,
   packetSize: 1316,
   debug: false,
   debugReturn: false,
@@ -72,7 +74,6 @@ export const DEFAULT_CAMERA_CONFIG = {
 
 /**
  * Stream type to RTSP channel suffix mapping
- * Channel format: {channelId}01 for mainstream, {channelId}02 for substream, etc.
  */
 export const STREAM_TYPE_SUFFIX = {
   mainstream: '01',
@@ -89,12 +90,10 @@ export const DEFAULT_RTSP_PORT = 554;
  * Motion event types from ISAPI
  */
 export const MOTION_EVENT_TYPES = [
-  'VMD',           // Video Motion Detection
-  'linedetection', // Line Crossing Detection
+  'VMD',            // Video Motion Detection
+  'linedetection',  // Line Crossing Detection
   'fielddetection', // Intrusion Detection
   'regionEntrance', // Region Entrance
   'regionExiting',  // Region Exiting
   'shelteralarm',   // Video Tampering
 ];
-
-
