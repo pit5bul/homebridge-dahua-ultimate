@@ -13,7 +13,6 @@ import {
   VideoInfo,
 } from 'homebridge';
 import { spawn, ChildProcess } from 'child_process';
-import { Socket } from 'dgram';
 import { CameraConfig, VideoConfig } from '../configTypes';
 import {
   DEFAULT_VIDEO_CONFIG,
@@ -41,10 +40,7 @@ interface SessionInfo {
 interface ActiveSession {
   sessionInfo: SessionInfo;
   videoProcess?: ChildProcess;
-  audioProcess?: ChildProcess;
-  returnProcess?: ChildProcess;
   timeout?: NodeJS.Timeout;
-  socket?: Socket;
 }
 
 interface ResolutionInfo {
@@ -54,9 +50,6 @@ interface ResolutionInfo {
   resizeFilter?: string;
 }
 
-// Snapshot queue entry
-
-
 export class StreamingDelegate implements CameraStreamingDelegate {
   private readonly hap: HAP;
   private readonly videoConfig: VideoConfig;
@@ -65,8 +58,6 @@ export class StreamingDelegate implements CameraStreamingDelegate {
   private activeSessions: Map<string, ActiveSession> = new Map();
   private cachedSnapshot?: Buffer;
   private cachedSnapshotTime = 0;
-
-
 
   constructor(
     hap: HAP,
@@ -86,10 +77,8 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     const maxWidth = Math.min(this.videoConfig.maxWidth || HOMEKIT_MAX_WIDTH, HOMEKIT_MAX_WIDTH);
     const maxHeight = Math.min(this.videoConfig.maxHeight || HOMEKIT_MAX_HEIGHT, HOMEKIT_MAX_HEIGHT);
 
-    // qualityPreset acts as a resolution floor for streaming.
-    // HomeKit always starts with a low-resolution probe (640x360) before sending RECONFIGURE.
-    // By forcing the preset resolution from the first request, we eliminate the RECONFIGURE
-    // cycle and the double stream start it causes.
+    // qualityPreset acts as a floor for streaming — force the preset resolution
+    // regardless of what HomeKit requests (HomeKit always starts low as a probe)
     if (!isSnapshot && this.videoConfig.qualityPreset) {
       requestedWidth = maxWidth;
       requestedHeight = maxHeight;
@@ -152,6 +141,11 @@ export class StreamingDelegate implements CameraStreamingDelegate {
           ':force_original_aspect_ratio=decrease');
       }
       
+      // Add custom video filter if provided (and not already hardware scale)
+      if (this.videoConfig.videoFilter && !this.videoConfig.videoFilter.includes('scale_')) {
+        filters.push(this.videoConfig.videoFilter);
+      }
+      
       if (filters.length > 0) {
         resInfo.videoFilter = filters.join(',');
       }
@@ -162,10 +156,10 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
   async handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): Promise<void> {
     const resolution = this.determineResolution(request, true);
-    this.log.info(`Snapshot request: ${request.width}x${request.height} -> ${resolution.width}x${resolution.height}`, this.cameraConfig.name);
+    this.log.debug(`Snapshot request: ${request.width}x${request.height} -> ${resolution.width}x${resolution.height}`, this.cameraConfig.name);
 
     const now = Date.now();
-    if (this.cachedSnapshot && now - this.cachedSnapshotTime < 5000) {
+    if (this.cachedSnapshot && now - this.cachedSnapshotTime < 3000) {
       this.log.debug('Returning cached snapshot', this.cameraConfig.name);
       callback(undefined, this.cachedSnapshot);
       return;
@@ -213,12 +207,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       callback(undefined, snapshot);
     });
 
-    setTimeout(() => {
-      if (!ffmpeg.killed) {
-        ffmpeg.kill('SIGKILL');
-        this.log.warn('Snapshot timeout', this.cameraConfig.name);
-      }
-    }, 15000);
+    setTimeout(() => { if (!ffmpeg.killed) { ffmpeg.kill('SIGKILL'); this.log.warn('Snapshot timeout', this.cameraConfig.name); } }, 15000);
   }
 
   async prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): Promise<void> {
@@ -260,10 +249,9 @@ export class StreamingDelegate implements CameraStreamingDelegate {
         this.startStream(request, callback);
         break;
       case StreamRequestTypes.RECONFIGURE:
-        // qualityPreset forces the start resolution so RECONFIGURE is a no-op —
-        // the stream is already at the correct resolution and bitrate from the first request.
+        // qualityPreset forces the start resolution so RECONFIGURE is a no-op
         if ('video' in request) {
-          this.log.debug(`Reconfigure ignored (qualityPreset already at target): ${request.video.width}x${request.video.height}`, this.cameraConfig.name);
+          this.log.debug(`Reconfigure ignored (already at preset resolution): ${request.video.width}x${request.video.height}`, this.cameraConfig.name);
         }
         callback();
         break;
@@ -295,28 +283,17 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
     let bitrate = request.video.max_bit_rate;
     if (this.videoConfig.maxBitrate && bitrate > this.videoConfig.maxBitrate) bitrate = this.videoConfig.maxBitrate;
-    // qualityPreset bitrate floor — prevent HomeKit's probe bitrate (~132kbps) from being used
+    // qualityPreset bitrate is a floor — don't let HomeKit's probe bitrate win
     if (this.videoConfig.qualityPreset) {
       const presetBitrate = QUALITY_PRESETS[this.videoConfig.qualityPreset]?.maxBitrate;
       if (presetBitrate && bitrate < presetBitrate) bitrate = presetBitrate;
     }
 
     this.log.info(`Starting stream: ${resolution.width}x${resolution.height} ${bitrate}kbps`, this.cameraConfig.name);
-    
+
     // Log encoder and pipeline being used
     const encoder = this.videoConfig.encoder || 'software';
-    
-    // Derive vcodec same way buildFfmpegArgs does
-    let vcodec = this.videoConfig.vcodec;
-    if (!vcodec) {
-      if (encoder === 'vaapi') vcodec = 'h264_vaapi';
-      else if (encoder === 'amf') vcodec = 'h264_amf';
-      else if (encoder === 'quicksync') vcodec = 'h264_qsv';
-      else if (encoder === 'nvenc') vcodec = 'h264_nvenc';
-      else if (encoder === 'videotoolbox') vcodec = 'h264_videotoolbox';
-      else if (encoder === 'v4l2') vcodec = 'h264_v4l2m2m';
-      else vcodec = 'libx264';
-    }
+    const vcodec = this.deriveVcodec(encoder);
     
     if (encoder === 'software') {
       this.log.info(`Video encoder: ${vcodec} (software)`, this.cameraConfig.name);
@@ -345,13 +322,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     if (this.videoConfig.audio) {
       const audioCodecName = 'audio' in request && request.audio.codec === AudioStreamingCodecType.OPUS ? 'OPUS' : 
                              'audio' in request && request.audio.codec === AudioStreamingCodecType.AAC_ELD ? 'AAC-eld' : 'unknown';
-      // Log actual negotiated audio parameters for visibility
-      if ('audio' in request) {
-        const copyMode = this.videoConfig.copyAudio ? ' (copy)' : '';
-        this.log.info(`Audio enabled: ${audioCodecName} ${request.audio.sample_rate}kHz ${request.audio.max_bit_rate}kbps${copyMode}`, this.cameraConfig.name);
-      } else {
-        this.log.info(`Audio enabled: ${audioCodecName}`, this.cameraConfig.name);
-      }
+      this.log.info(`Audio enabled: ${audioCodecName}`, this.cameraConfig.name);
     }
 
     // Split the command string into array for spawn
@@ -376,21 +347,8 @@ export class StreamingDelegate implements CameraStreamingDelegate {
   }
 
   private buildFfmpegArgs(source: string, sessionInfo: SessionInfo, resolution: ResolutionInfo, bitrate: number, request: StreamingRequest): string {
-    // Build FFmpeg command as a single string, exactly like homebridge-camera-ffmpeg
     const encoder = this.videoConfig.encoder || 'software';
-    
-    // Derive vcodec from encoder if not explicitly set
-    let vcodec = this.videoConfig.vcodec;
-    if (!vcodec) {
-      // Auto-select vcodec based on encoder
-      if (encoder === 'vaapi') vcodec = 'h264_vaapi';
-      else if (encoder === 'amf') vcodec = 'h264_amf';
-      else if (encoder === 'quicksync') vcodec = 'h264_qsv';
-      else if (encoder === 'nvenc') vcodec = 'h264_nvenc';
-      else if (encoder === 'videotoolbox') vcodec = 'h264_videotoolbox';
-      else if (encoder === 'v4l2') vcodec = 'h264_v4l2m2m';
-      else vcodec = 'libx264'; // software default
-    }
+    const vcodec = this.deriveVcodec(encoder);
     
     const mtu = this.videoConfig.packetSize || 1316;
     let encoderOptions = this.videoConfig.encoderOptions;
@@ -504,15 +462,15 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
     // AMF doesn't need special init - it accepts software frames
     
-    // Add -use_wallclock_as_timestamps to fix NVR irregular PTS causing HomeKit buffering delay
     // Modify source to skip audio track if audio is disabled
     let modifiedSource = source;
     if (!this.videoConfig.audio && source.includes('rtsp://')) {
+      // Insert -allowed_media_types video before -i to skip audio during RTSP connection
       modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
     }
-
-    // Add source (includes -i), prefixed with wallclock timestamp fix
-    ffmpegArgs += `-use_wallclock_as_timestamps 1 ${modifiedSource}`;
+    
+    // Add source (includes -i)
+    ffmpegArgs += modifiedSource;
 
     // Video encoding settings
     const isHardwareEncoder = encoder !== 'software';
@@ -521,7 +479,8 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     const gopParams = gopSize > 0 ? ` -g ${gopSize}` : ''; // Only add if quality profile set
     const bframeParams = bframes >= 0 ? ` -bf ${bframes}` : ''; // Only add if quality profile set (-1 = skip)
     
-    ffmpegArgs += ` -an -sn -dn -codec:v ${vcodec
+    ffmpegArgs += `${' -an -sn -dn'
+      } -codec:v ${vcodec
       }${pixFmt
       }${colorRange
       }${resolution.videoFilter ? ` -filter:v ${resolution.videoFilter}` : ''
@@ -542,12 +501,10 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     // Audio (if enabled)
     if (this.videoConfig.audio && 'audio' in request) {
       if (request.audio.codec === AudioStreamingCodecType.OPUS || request.audio.codec === AudioStreamingCodecType.AAC_ELD) {
+        // Use copy if enabled and codec is compatible, otherwise transcode
         const useAudioCopy = this.videoConfig.copyAudio === true;
-        // Only apply soxr resampler when transcoding (not copying)
-        const audioFilter = useAudioCopy ? '' : ' -af aresample=resampler=soxr';
-
         ffmpegArgs // Audio
-          += `${ ' -vn -sn -dn'
+          += `${' -vn -sn -dn'
           + (useAudioCopy
             ? ' -codec:a copy'
             : request.audio.codec === AudioStreamingCodecType.OPUS
@@ -555,7 +512,6 @@ export class StreamingDelegate implements CameraStreamingDelegate {
               + ' -application lowdelay'
               : ' -codec:a libfdk_aac'
                 + ' -profile:a aac_eld')
-          }${audioFilter
           } -flags +global_header`
           + ` -f rtp`
           + (useAudioCopy ? '' : ` -ar ${request.audio.sample_rate}k`)
@@ -581,15 +537,22 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     return ffmpegArgs;
   }
 
+  private deriveVcodec(encoder: string): string {
+    if (encoder === 'vaapi') return 'h264_vaapi';
+    if (encoder === 'amf') return 'h264_amf';
+    if (encoder === 'quicksync') return 'h264_qsv';
+    if (encoder === 'nvenc') return 'h264_nvenc';
+    if (encoder === 'videotoolbox') return 'h264_videotoolbox';
+    if (encoder === 'v4l2') return 'h264_v4l2m2m';
+    return 'libx264';
+  }
+
   private stopStream(sessionID: string): void {
     const session = this.activeSessions.get(sessionID);
     if (!session) return;
 
     this.log.info('Stopping stream', this.cameraConfig.name);
     if (session.videoProcess) session.videoProcess.kill('SIGKILL');
-    if (session.audioProcess) session.audioProcess.kill('SIGKILL');
-    if (session.returnProcess) session.returnProcess.kill('SIGKILL');
-    if (session.socket) session.socket.close();
     if (session.timeout) clearTimeout(session.timeout);
     this.activeSessions.delete(sessionID);
   }
@@ -600,7 +563,3 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
   }
 }
-
-
-
-
