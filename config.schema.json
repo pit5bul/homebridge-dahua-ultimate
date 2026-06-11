@@ -251,8 +251,35 @@
                   "maximum": 1080,
                   "description": "Maximum video height. HomeKit max is 1080."
                 },
+                "qualityPreset": {
+                  "title": "Quality Preset",
+                  "type": "string",
+                  "oneOf": [
+                    {
+                      "title": "Not set (use maxWidth/maxHeight/maxBitrate manually)",
+                      "enum": [""]
+                    },
+                    {
+                      "title": "480p Standard (854x480, 500kbps)",
+                      "enum": ["480p-standard"]
+                    },
+                    {
+                      "title": "720p Standard (1280x720, 1500kbps)",
+                      "enum": ["720p-standard"]
+                    },
+                    {
+                      "title": "1080p Standard (1920x1080, 2000kbps)",
+                      "enum": ["1080p-standard"]
+                    },
+                    {
+                      "title": "1080p High Quality (1920x1080, 4000kbps)",
+                      "enum": ["1080p-hq"]
+                    }
+                  ],
+                  "description": "Recommended. Sets a fixed resolution and bitrate floor, preventing HomeKit's adaptive probe from starting at 640x360 and causing a slow double stream start. Select the resolution that matches your NVR substream configuration."
+                },
                 "resolutionMode": {
-                  "title": "Resolution Mode",
+                  "title": "Resolution Mode (legacy)",
                   "type": "string",
                   "default": "adaptive",
                   "oneOf": [
@@ -269,7 +296,7 @@
                       "enum": ["force-custom"]
                     }
                   ],
-                  "description": "How to handle HomeKit's resolution requests. Adaptive (default) allows HomeKit to start at low resolution and upgrade. Force modes override HomeKit requests - useful for VAAPI and other hardware encoders that work better at fixed resolutions."
+                  "description": "Legacy option. Use qualityPreset instead for better results."
                 },
                 "customWidth": {
                   "title": "Custom Width",
@@ -533,6 +560,7 @@
               "items": [
                 "cameras[].videoConfig.maxWidth",
                 "cameras[].videoConfig.maxHeight",
+                "cameras[].videoConfig.qualityPreset",
                 "cameras[].videoConfig.resolutionMode",
                 "cameras[].videoConfig.customWidth",
                 "cameras[].videoConfig.customHeight",
@@ -611,4 +639,5 @@
     }
   ]
 }
+
 
