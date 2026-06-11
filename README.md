@@ -18,29 +18,32 @@ Homebridge plugin for Dahua NVR cameras with **automatic discovery**, motion det
 ### ⚡ Instant Stream Start
 - **`qualityPreset` option** eliminates HomeKit's adaptive probe/RECONFIGURE cycle — streams start immediately at full quality with no restart
 - Without a preset, HomeKit starts every stream at 640x360/132kbps, then tears it down and restarts at the correct resolution — causing 20-40 second delays
-- Set `qualityPreset` to match your NVR substream: `480p-standard`, `720p-standard`, `1080p-standard`, or `1080p-hq`
+- Set `qualityPreset` to match your NVR stream: `480p-standard`, `720p-standard`, `1080p-standard`, or `1080p-hq`
 
 ### 📹 High-Quality Streaming
-- 1080p @ 30fps streaming to HomeKit
-- Hardware acceleration support (reduces CPU usage by 75-87% with VAAPI)
+- Up to 1080p streaming to HomeKit
+- Hardware acceleration support via `encoder` option (VAAPI, NVENC, QuickSync, AMF, VideoToolbox, V4L2)
 - Software encoding fallback for immediate operation
 - Configurable bitrate and resolution per camera
-- **Resolution mode control** for hardware encoder optimization
+
+### 🕐 Dahua NVR Timestamp Fix
+- Dahua NVRs send RTSP frames with highly irregular PTS timestamps, which causes FFmpeg to buffer frames for 20+ seconds before HomeKit displays video
+- The plugin automatically applies `-use_wallclock_as_timestamps 1` to all RTSP streams, replacing NVR timestamps with system wall clock time and eliminating the buffering delay
 
 ### 🎯 Motion Detection
 - Real-time motion events via CGI API event streams
 - Native Dahua motion detection (no video analysis needed)
 - Configurable motion timeout
 - Triggers HomeKit motion sensor
-- Support for multiple event types (VideoMotion, CrossLine, etc.)
+- Support for multiple event types (VideoMotion, CrossLine, CrossRegionDetection, AlarmLocal)
 
 ### 🚀 Hardware Acceleration
-- **VAAPI** - Intel/AMD GPUs on Linux
-- **QuickSync** - Intel integrated graphics
-- **NVENC** - NVIDIA GPUs
-- **AMF** - AMD GPUs on Windows
-- **VideoToolbox** - Apple Silicon and Intel Macs
-- **V4L2** - Raspberry Pi 4+
+- **VAAPI** — Intel/AMD GPUs on Linux
+- **QuickSync** — Intel integrated graphics
+- **NVENC** — NVIDIA GPUs
+- **AMF** — AMD GPUs on Windows
+- **VideoToolbox** — Apple Silicon and Intel Macs
+- **V4L2** — Raspberry Pi 4+
 
 ### 📸 Fast Snapshots
 - CGI-based snapshots via NVR HTTP/HTTPS API
@@ -122,56 +125,20 @@ On first startup with the minimum config above:
 4. Cameras appear in HomeKit within 30 seconds
 5. Configuration is saved to config.json
 
-### After Discovery
-
-After the first discovery, your config will look like:
-
-```json
-{
-  "platform": "DahuaUltimate",
-  "name": "Dahua NVR",
-  "host": "192.168.1.100",
-  "port": 443,
-  "secure": true,
-  "username": "admin",
-  "password": "your_password",
-  "forceDiscovery": false,
-  "cameras": [
-    {
-      "channelId": 1,
-      "name": "Front Door",
-      "enabled": true,
-      "manufacturer": "Dahua",
-      "model": "Dahua IP Camera"
-    },
-    {
-      "channelId": 2,
-      "name": "Backyard",
-      "enabled": true
-    },
-    {
-      "channelId": 6,
-      "name": "Channel6",
-      "enabled": false
-    }
-  ]
-}
-```
-
 ## Configuration
 
 ### Platform Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `platform` | string | - | **Required.** Must be "DahuaUltimate" |
-| `name` | string | "Dahua NVR" | Platform name in logs |
+| `platform` | string | - | **Required.** Must be `DahuaUltimate` |
+| `name` | string | `Dahua NVR` | Platform name in logs |
 | `host` | string | - | **Required.** NVR IP address or hostname |
 | `port` | number | 80 | HTTP (80) or HTTPS (443) port |
 | `secure` | boolean | false | Use HTTPS. Auto-enabled for port 443 |
 | `username` | string | - | **Required.** NVR username |
 | `password` | string | - | **Required.** NVR password |
-| `forceDiscovery` | boolean | false | Force re-discovery (auto-resets to false) |
+| `forceDiscovery` | boolean | false | Force re-discovery on next start (auto-resets) |
 | `debugMotion` | boolean | false | Enable verbose motion event logging |
 | `cameras` | array | [] | Camera configurations (auto-populated) |
 
@@ -179,112 +146,123 @@ After the first discovery, your config will look like:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `channelId` | number | - | **Required.** Camera channel ID (1-based) |
+| `channelId` | number | - | **Required.** Camera channel (1-based) |
 | `name` | string | - | **Required.** Camera display name |
 | `enabled` | boolean | true | Enable/disable this camera |
-| `manufacturer` | string | "Dahua" | Camera manufacturer |
-| `model` | string | "Dahua IP Camera" | Camera model |
+| `manufacturer` | string | `Dahua` | Camera manufacturer |
+| `model` | string | `Dahua IP Camera` | Camera model |
 | `motion` | boolean | true | Enable motion detection |
 | `motionTimeout` | number | 15 | Motion clear timeout (seconds) |
-| `unbridge` | boolean | false | Run as separate accessory (for HKSV) |
+| `unbridge` | boolean | false | Run as separate accessory (required for HKSV) |
 | `videoConfig` | object | - | Advanced video configuration |
 
-### Advanced Video Configuration
+### Video Config Options
 
-```json
-{
-  "videoConfig": {
-    "source": "-rtsp_transport tcp -i rtsp://...",
-    "stillImageSource": "-i https://...",
-    "maxStreams": 2,
-    "maxWidth": 1920,
-    "maxHeight": 1080,
-    "maxFPS": 30,
-    "maxBitrate": 4000,
-    "encoderOptions": "libx264",
-    "videoFilter": "scale=1920:1080",
-    "audio": false
-  }
-}
-```
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `source` | string | - | Full FFmpeg source args including `-i` |
+| `stillImageSource` | string | - | FFmpeg args for snapshot |
+| `maxStreams` | number | 2 | Maximum concurrent streams |
+| `maxWidth` | number | 1920 | Maximum stream width |
+| `maxHeight` | number | 1080 | Maximum stream height |
+| `maxBitrate` | number | 4000 | Maximum bitrate (kbps) |
+| `qualityPreset` | string | - | `480p-standard`, `720p-standard`, `1080p-standard`, `1080p-hq` — see below |
+| `encoder` | string | `software` | `software`, `vaapi`, `amf`, `quicksync`, `nvenc`, `videotoolbox`, `v4l2` |
+| `qualityProfile` | string | - | `speed`, `balanced`, `quality` |
+| `hwaccelDevice` | string | `/dev/dri/renderD128` | Hardware device path (VAAPI) |
+| `audio` | boolean | false | Enable audio |
+| `copyAudio` | boolean | false | Pass audio through without transcoding |
+| `recording` | boolean | false | Enable HKSV recording |
+| `prebuffer` | boolean | false | Enable prebuffer for HKSV |
+| `prebufferLength` | number | 4000 | Prebuffer length (ms) |
+| `packetSize` | number | 1316 | RTP packet size (MTU) |
+| `debug` | boolean | false | Enable verbose FFmpeg logging |
+
+## Quality Presets
+
+Setting `qualityPreset` is **strongly recommended**. Without it, HomeKit performs an adaptive probe — starting every stream at 640x360/132kbps — before tearing it down and restarting at the correct resolution. This causes a 20-40 second delay before video appears.
+
+With `qualityPreset` set, the plugin forces the correct resolution and bitrate from the very first stream request, eliminating the restart entirely.
+
+| Preset | Resolution | Bitrate | Use case |
+|--------|-----------|---------|----------|
+| `480p-standard` | 854x480 | 500kbps | NVR substreams (704x576) |
+| `720p-standard` | 1280x720 | 1500kbps | 720p streams |
+| `1080p-standard` | 1920x1080 | 2000kbps | 1080p mainstream |
+| `1080p-hq` | 1920x1080 | 4000kbps | 1080p high quality |
+
+For Dahua NVR substreams (typically 704x576), use `480p-standard`.
 
 ## Hardware Acceleration
 
-### Benefits
-- ✅ Reduced CPU usage (75-87% reduction with VAAPI)
-- ✅ Multiple concurrent streams
-- ✅ Lower power consumption
-- ✅ Better system performance
+**Important:** The bundled `ffmpeg-for-homebridge` package does **not** include hardware encoder support. You must install or compile a custom FFmpeg binary with the appropriate codecs for your GPU.
 
-### Setup
+### Configuration
 
-**IMPORTANT:** The bundled `ffmpeg-for-homebridge` package **ONLY contains software codecs** and does NOT include hardware acceleration support. To enable hardware acceleration, you MUST install or compile a custom FFmpeg with hardware encoder support for your specific GPU.
-
-#### 1. Install FFmpeg with Hardware Support
-
-You must install or compile FFmpeg with the appropriate hardware codecs for your system:
-- **VAAPI** - Intel/AMD GPUs on Linux
-- **QuickSync** - Intel integrated graphics
-- **NVENC** - NVIDIA GPUs
-- **AMF** - AMD GPUs on Windows
-- **VideoToolbox** - Apple Silicon and Intel Macs
-- **V4L2** - Raspberry Pi 4+
-
-This is system-specific and beyond the scope of this plugin documentation. The plugin cannot provide hardware acceleration without a properly compiled FFmpeg binary.
-
-**Verify your FFmpeg has hardware support:**
-```bash
-# Check for VAAPI
-ffmpeg -encoders | grep vaapi
-
-# Check for NVENC
-ffmpeg -encoders | grep nvenc
-
-# Check for QuickSync
-ffmpeg -encoders | grep qsv
-
-# Check for VideoToolbox
-ffmpeg -encoders | grep videotoolbox
-```
-
-#### 2. Configure Hardware Encoder
-
-Edit your camera's `videoConfig`:
+Set the `encoder` field in `videoConfig`:
 
 ```json
 {
   "videoConfig": {
-    "encoderOptions": "h264_vaapi",
-    "videoFilter": "format=nv12,hwupload"
+    "encoder": "vaapi",
+    "hwaccelDevice": "/dev/dri/renderD128",
+    "qualityProfile": "speed"
   }
 }
 ```
 
-**VAAPI Example (Intel/AMD):**
+### VAAPI (Intel/AMD on Linux)
+
 ```json
 {
-  "encoderOptions": "h264_vaapi",
-  "videoFilter": "format=nv12,hwupload"
+  "encoder": "vaapi",
+  "hwaccelDevice": "/dev/dri/renderD128",
+  "qualityProfile": "speed"
 }
 ```
 
-**NVENC Example (NVIDIA):**
-```json
-{
-  "encoderOptions": "h264_nvenc",
-  "videoFilter": "scale_npp=format=nv12"
-}
+The plugin uses a full GPU pipeline: hardware decode → GPU scale → hardware encode. Requires a custom FFmpeg build with `--enable-vaapi`.
+
+**Verify your FFmpeg has VAAPI support:**
+```bash
+ffmpeg -encoders | grep vaapi
 ```
 
-If hardware encoding fails, the plugin will automatically fall back to software encoding (libx264).
+### Other Encoders
+
+| Encoder | Codec | Notes |
+|---------|-------|-------|
+| `vaapi` | h264_vaapi | Intel/AMD Linux — full GPU pipeline |
+| `nvenc` | h264_nvenc | NVIDIA — software decode, GPU encode |
+| `quicksync` | h264_qsv | Intel — software decode, GPU encode |
+| `amf` | h264_amf | AMD Windows — software decode, GPU encode |
+| `videotoolbox` | h264_videotoolbox | macOS — Apple Silicon and Intel |
+| `v4l2` | h264_v4l2m2m | Raspberry Pi 4+ |
+| `software` | libx264 | CPU encoding, works everywhere |
+
+## Stream Types
+
+Dahua cameras provide multiple streams:
+
+- **Mainstream** (`subtype=0`): Full resolution, high bitrate — best quality
+- **Substream** (`subtype=1`): Lower resolution — recommended for HomeKit to reduce NVR load
+- **Thirdstream** (`subtype=2`): Lowest resolution — for slow connections
+
+Use the `source` field in `videoConfig` to select the stream:
+```
+rtsp://admin:password@nvr-ip:554/cam/realmonitor?channel=1&subtype=0
+rtsp://admin:password@nvr-ip:554/cam/realmonitor?channel=1&subtype=1
+```
 
 ## Motion Detection
 
-### Setup
-1. Motion detection is enabled by default
-2. Events are received via Dahua's CGI event stream
-3. Motion events trigger HomeKit notifications
-4. Configure timeout to prevent rapid on/off cycling
+Motion detection is enabled by default and uses Dahua's CGI event stream.
+
+### Supported Events
+- `VideoMotion` — General motion detection
+- `CrossLineDetection` — Line crossing
+- `CrossRegionDetection` — Intrusion detection
+- `AlarmLocal` — Local alarm trigger
 
 ### Configuration
 
@@ -295,77 +273,57 @@ If hardware encoding fails, the plugin will automatically fall back to software 
 }
 ```
 
-### Supported Events
-- VideoMotion - General motion detection
-- CrossLineDetection - Line crossing
-- CrossRegionDetection - Intrusion detection
-- AlarmLocal - Local alarm trigger
-
 ## Troubleshooting
+
+### Streams Not Starting / FFmpeg Error
+
+If you see `Unrecognized option` or `Error splitting the argument list` in logs, ensure you are on **v1.2.0 or later**. Earlier versions had a bug that injected stray characters into the FFmpeg argument string.
+
+### Video Delayed 20+ Seconds
+
+Set `qualityPreset` in each camera's `videoConfig`. This eliminates HomeKit's probe/RECONFIGURE cycle.
+
+If using mainstream H.265 streams, Dahua NVRs are known to send irregular PTS timestamps which the plugin automatically corrects with `-use_wallclock_as_timestamps 1`. Ensure you are on v1.1.9 or later.
+
+### No Audio
+
+Ensure you are on **v1.2.0 or later**. Earlier versions had a bug that silently discarded the audio stream.
+
+Set `audio: true` in `videoConfig`. For most Dahua NVRs, leave `copyAudio: false` (transcoding required as NVRs typically output G.711).
 
 ### Cameras Not Appearing
 
-1. **Check NVR credentials** - Ensure correct username/password
-2. **Verify network connectivity** - Can you ping the NVR?
-3. **Check Homebridge logs** for errors
-4. **Force re-discovery**:
+1. Check NVR credentials
+2. Verify network connectivity
+3. Check Homebridge logs for errors
+4. Force re-discovery:
    ```json
-   {
-     "forceDiscovery": true
-   }
+   { "forceDiscovery": true }
    ```
 5. Restart Homebridge
 
-### Motion Detection Not Working
-
-1. **Verify motion is enabled** in camera config
-2. **Check NVR motion settings** - Must be enabled in Dahua NVR
-3. **Enable debug logging**:
-   ```json
-   {
-     "debugMotion": true
-   }
-   ```
-4. Check logs for motion events
-
 ### Snapshots Failing
 
-**Symptoms:** "Snapshot FFmpeg exited with code 8"
-
-**Common Causes:**
-- Wrong port (using HTTP on HTTPS port or vice versa)
-- Incorrect credentials
-- NVR blocking snapshot requests
-
-**Solution:**
+Verify port and protocol match:
 ```json
-{
-  "port": 443,
-  "secure": true
-}
+{ "port": 443, "secure": true }
 ```
 
-Or try:
-```json
-{
-  "port": 80,
-  "secure": false
-}
-```
-
-### Streams Not Starting
-
-1. **Verify RTSP URLs** - Check logs for generated URLs
-2. **Test RTSP manually**:
-   ```bash
-   ffplay -rtsp_transport tcp "rtsp://admin:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0"
-   ```
-3. **Check FFmpeg** is installed and accessible
-4. **Try software encoding** if hardware encoding fails
+Note: The doorbell channel snapshot CGI endpoint on some Dahua NVRs consistently times out. This is an NVR firmware limitation and cannot be fixed in the plugin.
 
 ### SSL Certificate Errors
 
 The plugin automatically disables SSL certificate verification for self-signed certificates. No action needed.
+
+### Hardware Acceleration Not Working
+
+Verify your FFmpeg binary has the required encoder:
+```bash
+ffmpeg -encoders | grep vaapi   # for VAAPI
+ffmpeg -encoders | grep nvenc   # for NVENC
+```
+
+If hardware encoding fails at runtime, switch `encoder` back to `software` and the plugin will use libx264.
 
 ## API Compatibility
 
@@ -378,19 +336,9 @@ This plugin uses Dahua's HTTP CGI API:
 
 Tested with Dahua NVR firmware 4.x and newer.
 
-## Stream Types
-
-Dahua cameras provide multiple streams:
-
-- **Mainstream** (subtype=0): Full resolution, high bitrate - best quality
-- **Substream** (subtype=1): Lower resolution - for remote viewing
-- **Thirdstream** (subtype=2): Lowest resolution - for slow connections
-
-The plugin automatically uses mainstream for local HomeKit viewing.
-
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Support
 
@@ -403,10 +351,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
 - **Author**: pit5bul
 - **Based on**: homebridge-hikvision-ultimate architecture
 - **Inspired by**: homebridge-camera-ffmpeg
-- **FFmpeg**: The FFmpeg team for the incredible video processing library
 
 ## License
 
-PERSONAL‑USE LICENSE AGREEMENT - See [LICENSE](LICENSE) file for details
-
-
+PERSONAL-USE LICENSE — See [LICENSE](LICENSE) file for details.
