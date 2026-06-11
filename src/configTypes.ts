@@ -91,3 +91,50 @@ export interface VideoConfig {
   // Debug
   debug?: boolean;
 }
+
+export interface DiscoveredChannel {
+  id: number;
+  name: string;
+  inputPort: number;
+  enabled: boolean;
+}
+
+export interface DetectedStreamInfo {
+  videoCodec?: string;
+  videoProfile?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  videoBitrate?: number;
+  audioCodec?: string;
+  audioSampleRate?: number;
+  audioChannels?: number;
+  probedAt?: string;
+}
+
+export interface FfprobeResult {
+  streams?: FfprobeStream[];
+  format?: FfprobeFormat;
+}
+
+export interface FfprobeStream {
+  index: number;
+  codec_name?: string;
+  codec_long_name?: string;
+  profile?: string;
+  codec_type?: 'video' | 'audio' | 'subtitle' | 'data';
+  width?: number;
+  height?: number;
+  r_frame_rate?: string;
+  avg_frame_rate?: string;
+  bit_rate?: string;
+  sample_rate?: string;
+  channels?: number;
+}
+
+export interface FfprobeFormat {
+  filename?: string;
+  format_name?: string;
+  duration?: string;
+  bit_rate?: string;
+}
