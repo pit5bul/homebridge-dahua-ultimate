@@ -521,7 +521,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     const gopParams = gopSize > 0 ? ` -g ${gopSize}` : ''; // Only add if quality profile set
     const bframeParams = bframes >= 0 ? ` -bf ${bframes}` : ''; // Only add if quality profile set (-1 = skip)
     
-    ffmpegArgs += `' -an -sn -dn' -codec:v ${vcodec
+    ffmpegArgs += ` -an -sn -dn -codec:v ${vcodec
       }${pixFmt
       }${colorRange
       }${resolution.videoFilter ? ` -filter:v ${resolution.videoFilter}` : ''
@@ -557,7 +557,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
                 + ' -profile:a aac_eld')
           }${audioFilter
           } -flags +global_header`
-          + ` -f null`
+          + ` -f rtp`
           + (useAudioCopy ? '' : ` -ar ${request.audio.sample_rate}k`)
           + ` -b:a ${request.audio.max_bit_rate}k`
           + ` -ac ${request.audio.channel
@@ -600,6 +600,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
   }
 }
+
 
 
 
