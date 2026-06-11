@@ -48,7 +48,11 @@ export interface VideoConfig {
   // Quality preset — forces resolution + bitrate floor, eliminates HomeKit RECONFIGURE cycle
   qualityPreset?: QualityPreset;
 
+  // Bitrate limits
+  maxBitrate?: number;
+
   // Codec and Hardware Acceleration
+  vcodec?: string;               // Auto-derived from encoder, can be overridden
   encoder?: EncoderType;
   qualityProfile?: QualityProfile;
   encoderOptions?: string;
