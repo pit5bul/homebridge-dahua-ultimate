@@ -1,72 +1,104 @@
 import { PlatformConfig } from 'homebridge';
 
+/**
+ * Stream type options
+ */
 export type StreamType = 'mainstream' | 'substream' | 'thirdstream';
-export type EncoderType = 'software' | 'vaapi' | 'quicksync' | 'nvenc' | 'amf' | 'videotoolbox' | 'v4l2';
-export type QualityProfile = '' | 'speed' | 'balanced' | 'quality';
-export type QualityPreset = '480p-standard' | '720p-standard' | '1080p-standard' | '1080p-hq';
 
+/**
+ * Hardware encoder types
+ */
+export type EncoderType = 'software' | 'vaapi' | 'quicksync' | 'nvenc' | 'amf' | 'videotoolbox' | 'v4l2';
+
+/**
+ * Quality profile for hardware encoders
+ */
+export type QualityProfile = '' | 'speed' | 'balanced' | 'quality';
+
+/**
+ * Quality preset — maps to fixed resolution + bitrate
+ */
+export type QualityPreset = '720p-standard' | '1080p-standard' | '1080p-hq';
+
+/**
+ * Platform configuration interface
+ */
 export interface DahuaPlatformConfig extends PlatformConfig {
   platform: 'DahuaUltimate';
+
+  // NVR Connection
   host: string;
   port?: number;
   secure?: boolean;
   username: string;
   password: string;
+
+  // Discovery
   forceDiscovery?: boolean;
   streamType?: StreamType;
   probeOnStartup?: boolean;
   probeTimeout?: number;
+
+  // Global Advanced
   videoProcessor?: string;
   interfaceName?: string;
   debugMotion?: boolean;
+
+  // Cameras
   cameras?: CameraConfig[];
 }
 
+/**
+ * Individual camera configuration
+ */
 export interface CameraConfig {
+  // Identity
   channelId: number;
   name: string;
+
+  // Customization
   manufacturer?: string;
   model?: string;
   serialNumber?: string;
   firmwareRevision?: string;
+
+  // Stream
   streamType?: StreamType | '';
+
+  // Motion
   motion?: boolean;
   motionTimeout?: number;
+
+  // Control
   unbridge?: boolean;
   enabled?: boolean;
+
+  // Video Config
   videoConfig?: VideoConfig;
 
-  // Populated at runtime by ffprobe (not user-configurable)
-  detected?: {
-    videoCodec?: string;
-    width?: number;
-    height?: number;
-    fps?: number;
-    audioCodec?: string;
-    probedAt?: string;
-  };
+  // Detected info (read-only, populated by discovery/probe)
+  detected?: DetectedStreamInfo;
 }
 
+/**
+ * Video configuration for a camera
+ */
 export interface VideoConfig {
   // Source
   source?: string;
   stillImageSource?: string;
 
-  // Streams
-  maxStreams?: number;
-
-  // Quality preset — forces resolution + bitrate floor, eliminates HomeKit RECONFIGURE cycle
+  // Quality preset (maps to maxWidth/maxHeight/maxBitrate at runtime)
   qualityPreset?: QualityPreset;
 
-  // Bitrate limits
-  maxBitrate?: number;
-
-  // Resolution limits (set internally from qualityPreset, not exposed in UI)
+  // Limits (populated from qualityPreset at runtime)
+  maxStreams?: number;
   maxWidth?: number;
   maxHeight?: number;
+  maxFPS?: number;
+  maxBitrate?: number;
 
   // Codec and Hardware Acceleration
-  vcodec?: string;               // Auto-derived from encoder, can be overridden
   encoder?: EncoderType;
   qualityProfile?: QualityProfile;
   encoderOptions?: string;
@@ -76,35 +108,27 @@ export interface VideoConfig {
   audio?: boolean;
   copyAudio?: boolean;
 
-  // Flips
+  // Filters
+  videoFilter?: string;
   vflip?: boolean;
   hflip?: boolean;
 
   // Advanced
   packetSize?: number;
 
-  // HKSV
+  // Debug
+  debug?: boolean;
+  debugReturn?: boolean;
+
+  // HomeKit Secure Video (HKSV)
   recording?: boolean;
   prebuffer?: boolean;
   prebufferLength?: number;
-
-  // Debug
-  debug?: boolean;
 }
 
-export interface DiscoveredChannel {
-  id: number;
-  name: string;
-  inputPort: number;
-  enabled: boolean;
-  deviceInfo?: {
-    manufacturer?: string;
-    model?: string;
-    serialNumber?: string;
-    firmwareVersion?: string;
-  };
-}
-
+/**
+ * Detected stream information from ffprobe
+ */
 export interface DetectedStreamInfo {
   videoCodec?: string;
   videoProfile?: string;
@@ -118,6 +142,26 @@ export interface DetectedStreamInfo {
   probedAt?: string;
 }
 
+/**
+ * Discovered channel from NVR
+ */
+export interface DiscoveredChannel {
+  id: number;
+  name: string;
+  inputPort: number;
+  enabled: boolean;
+  resolutions?: string[];
+  deviceInfo?: {
+    manufacturer?: string;
+    model?: string;
+    serialNumber?: string;
+    firmwareVersion?: string;
+  };
+}
+
+/**
+ * ffprobe result structure
+ */
 export interface FfprobeResult {
   streams?: FfprobeStream[];
   format?: FfprobeFormat;
@@ -131,16 +175,20 @@ export interface FfprobeStream {
   codec_type?: 'video' | 'audio' | 'subtitle' | 'data';
   width?: number;
   height?: number;
+  coded_width?: number;
+  coded_height?: number;
   r_frame_rate?: string;
   avg_frame_rate?: string;
   bit_rate?: string;
   sample_rate?: string;
   channels?: number;
+  channel_layout?: string;
 }
 
 export interface FfprobeFormat {
   filename?: string;
   format_name?: string;
   duration?: string;
+  size?: string;
   bit_rate?: string;
 }
