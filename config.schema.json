@@ -2,32 +2,36 @@
   "pluginAlias": "DahuaUltimate",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Homebridge plugin for Dahua NVR cameras with motion detection and FFmpeg streaming.",
+  "headerDisplay": "Dahua Ultimate — official Homebridge plugin for Dahua NVR cameras, motion detection, and FFmpeg streaming.",
   "footerDisplay": "For help and documentation, visit the [GitHub repository](https://github.com/pit5bul/homebridge-dahua-ultimate).",
   "schema": {
     "type": "object",
-    "required": ["host", "username", "password"],
+    "required": [
+      "host",
+      "username",
+      "password"
+    ],
     "properties": {
       "name": {
         "title": "Platform Name",
         "type": "string",
         "default": "Dahua NVR",
-        "description": "The name that will appear in your Homebridge log."
+        "description": "Name shown in Homebridge logs."
       },
       "host": {
-        "title": "NVR IP Address / Hostname",
+        "title": "NVR IP / Hostname",
         "type": "string",
         "format": "hostname",
         "placeholder": "192.168.1.100",
-        "description": "The IP address or hostname of your Dahua NVR."
+        "description": "IP address or hostname of your Dahua NVR."
       },
       "port": {
-        "title": "NVR Port",
+        "title": "HTTP Port",
         "type": "integer",
         "default": 80,
         "minimum": 1,
         "maximum": 65535,
-        "description": "The HTTP port of your NVR (typically 80 or 443 for HTTPS)."
+        "description": "HTTP port of your NVR. Typically 80 or 8080."
       },
       "secure": {
         "title": "Use HTTPS",
@@ -38,50 +42,43 @@
       "username": {
         "title": "Username",
         "type": "string",
-        "placeholder": "admin",
-        "description": "The username for your NVR."
+        "placeholder": "admin"
       },
       "password": {
         "title": "Password",
-        "type": "string",
-        "description": "The password for your NVR."
+        "type": "string"
       },
       "forceDiscovery": {
-        "title": "Force Discovery",
+        "title": "Force Re-discovery",
         "type": "boolean",
         "default": false,
-        "description": "Re-discover cameras on next restart. New cameras will be added; existing cameras keep their settings."
+        "description": "Re-discover all cameras on next restart. New cameras are added; existing cameras keep their settings. Resets to false automatically after running."
       },
       "streamType": {
         "title": "Default Stream Type",
         "type": "string",
         "default": "mainstream",
         "oneOf": [
-          { "title": "Mainstream (High Quality)", "enum": ["mainstream"] },
-          { "title": "Substream (Lower Quality, less CPU)", "enum": ["substream"] },
-          { "title": "Third Stream", "enum": ["thirdstream"] }
+          {
+            "title": "Mainstream (high quality)",
+            "enum": [
+              "mainstream"
+            ]
+          },
+          {
+            "title": "Substream (lower bandwidth)",
+            "enum": [
+              "substream"
+            ]
+          },
+          {
+            "title": "Third stream",
+            "enum": [
+              "thirdstream"
+            ]
+          }
         ],
-        "description": "Default stream type for all cameras. Substream reduces CPU load significantly."
-      },
-      "probeOnStartup": {
-        "title": "Probe Streams on Startup",
-        "type": "boolean",
-        "default": false,
-        "description": "Run ffprobe on all cameras at startup to log codec/resolution info. Useful for initial setup. Adds startup delay."
-      },
-      "probeTimeout": {
-        "title": "Probe Timeout (ms)",
-        "type": "integer",
-        "default": 10000,
-        "minimum": 1000,
-        "maximum": 60000,
-        "description": "Timeout for ffprobe when probing streams on startup."
-      },
-      "videoProcessor": {
-        "title": "Custom FFmpeg Path",
-        "type": "string",
-        "placeholder": "/usr/bin/ffmpeg",
-        "description": "Path to a custom FFmpeg binary. Required when using hardware encoders (VAAPI, NVENC, etc.) as the bundled FFmpeg does not include hardware support."
+        "description": "Default stream type for all cameras. Can be overridden per camera. Substream reduces CPU and bandwidth usage."
       },
       "interfaceName": {
         "title": "Network Interface",
@@ -89,73 +86,261 @@
         "placeholder": "eth0",
         "description": "Network interface to use for streaming. Leave empty to auto-detect."
       },
+      "videoProcessor": {
+        "title": "Custom FFmpeg Path",
+        "type": "string",
+        "placeholder": "/usr/bin/ffmpeg",
+        "description": "Path to a custom FFmpeg binary. Required for hardware encoders (VAAPI, NVENC, QuickSync, etc.) — the bundled FFmpeg does not include hardware support."
+      },
+      "probeOnStartup": {
+        "title": "Probe Streams on Startup",
+        "type": "boolean",
+        "default": false,
+        "description": "Run ffprobe on all cameras at startup to log stream codec info. Useful when setting up or troubleshooting. Adds startup delay."
+      },
+      "probeTimeout": {
+        "title": "Probe Timeout (ms)",
+        "type": "integer",
+        "default": 10000,
+        "minimum": 1000,
+        "maximum": 60000,
+        "description": "Timeout for ffprobe when probing streams."
+      },
       "debugMotion": {
         "title": "Debug Motion Events",
         "type": "boolean",
         "default": false,
-        "description": "Enable verbose logging for motion detection events."
+        "description": "Log all raw motion events from the NVR event stream. Useful for diagnosing motion detection issues."
       },
       "cameras": {
         "type": "array",
         "items": {
           "title": "Camera",
           "type": "object",
-          "required": ["channelId", "name"],
+          "required": [
+            "channelId",
+            "name"
+          ],
           "properties": {
-            "channelId": {
-              "title": "Channel ID",
-              "type": "integer",
-              "minimum": 1,
-              "description": "The NVR channel number for this camera."
-            },
-            "name": {
-              "title": "Camera Name",
-              "type": "string",
-              "description": "Display name for this camera in HomeKit."
-            },
             "enabled": {
               "title": "Enabled",
               "type": "boolean",
               "default": true,
-              "description": "Disable this camera without removing it from config."
+              "description": "Disable to exclude this camera from HomeKit without removing it from config."
             },
-            "streamType": {
-              "title": "Stream Type",
+            "channelId": {
+              "title": "Channel ID",
+              "type": "integer",
+              "minimum": 1,
+              "description": "NVR channel number for this camera. Auto-populated by discovery."
+            },
+            "name": {
+              "title": "Camera Name",
               "type": "string",
-              "oneOf": [
-                { "title": "Use Global Default", "enum": [""] },
-                { "title": "Mainstream (High Quality)", "enum": ["mainstream"] },
-                { "title": "Substream (Lower Quality, less CPU)", "enum": ["substream"] },
-                { "title": "Third Stream", "enum": ["thirdstream"] }
-              ],
-              "description": "Override the global stream type for this camera. Note: if you manually set a custom source URL below, this setting is ignored."
+              "description": "Display name in HomeKit."
             },
             "motion": {
               "title": "Enable Motion Sensor",
               "type": "boolean",
               "default": true,
-              "description": "Expose a motion sensor for this camera triggered by NVR events."
+              "description": "Expose a motion sensor in HomeKit triggered by NVR ISAPI events."
             },
             "motionTimeout": {
               "title": "Motion Timeout (seconds)",
               "type": "integer",
               "default": 1,
               "minimum": 0,
-              "description": "Seconds after motion trigger before the sensor resets. 0 = manual reset only."
+              "description": "Seconds after motion stops before the sensor resets. 0 = never auto-reset."
             },
             "videoConfig": {
               "title": "Video Configuration",
               "type": "object",
               "properties": {
-                "source": {
-                  "title": "Custom RTSP Source",
+                "qualityPreset": {
+                  "title": "Video Quality",
                   "type": "string",
-                  "description": "Override the auto-generated RTSP source. Leave empty to use the NVR-generated URL. When set, Stream Type above is ignored."
+                  "default": "1080p-standard",
+                  "oneOf": [
+                    {
+                      "title": "720p Standard (1280×720, 1500kbps)",
+                      "enum": [
+                        "720p-standard"
+                      ]
+                    },
+                    {
+                      "title": "1080p Standard (1920×1080, 2000kbps) — Recommended",
+                      "enum": [
+                        "1080p-standard"
+                      ]
+                    },
+                    {
+                      "title": "1080p High Quality (1920×1080, 4000kbps)",
+                      "enum": [
+                        "1080p-hq"
+                      ]
+                    }
+                  ],
+                  "description": "Video quality preset. HomeKit maximum is 1080p."
                 },
-                "stillImageSource": {
-                  "title": "Custom Snapshot Source",
+                "audio": {
+                  "title": "Enable Audio",
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Enable audio streaming from the camera."
+                },
+                "copyAudio": {
+                  "title": "Copy Audio (no transcoding)",
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Pass camera audio directly without re-encoding. Works if your camera outputs AAC. Disable if audio is silent or choppy."
+                },
+                "vflip": {
+                  "title": "Flip Vertically",
+                  "type": "boolean",
+                  "default": false
+                },
+                "hflip": {
+                  "title": "Flip Horizontally",
+                  "type": "boolean",
+                  "default": false
+                },
+                "recording": {
+                  "title": "Enable iCloud Recording (HKSV)",
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Record motion events to iCloud via HomeKit Secure Video. Requires an iCloud+ plan and a HomeKit hub (HomePod, Apple TV, or iPad)."
+                },
+                "unbridge": {
+                  "title": "Unbridge Camera",
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Run as a separate accessory instead of through the Homebridge bridge. Recommended when using HKSV for better performance. Requires manual pairing after enabling."
+                },
+                "prebuffer": {
+                  "title": "Enable Pre-recording Buffer",
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Capture a few seconds of video before motion is detected. Requires iCloud Recording to be enabled."
+                },
+                "prebufferLength": {
+                  "title": "Buffer Duration",
+                  "type": "integer",
+                  "default": 4000,
+                  "oneOf": [
+                    {
+                      "title": "2 seconds",
+                      "enum": [
+                        2000
+                      ]
+                    },
+                    {
+                      "title": "4 seconds (recommended)",
+                      "enum": [
+                        4000
+                      ]
+                    },
+                    {
+                      "title": "6 seconds",
+                      "enum": [
+                        6000
+                      ]
+                    },
+                    {
+                      "title": "8 seconds",
+                      "enum": [
+                        8000
+                      ]
+                    }
+                  ],
+                  "description": "How much video to buffer before a motion event."
+                },
+                "encoder": {
+                  "title": "Video Encoder",
                   "type": "string",
-                  "description": "Override the auto-generated snapshot URL. Leave empty to use the NVR default."
+                  "default": "software",
+                  "oneOf": [
+                    {
+                      "title": "Software (libx264) — works everywhere",
+                      "enum": [
+                        "software"
+                      ]
+                    },
+                    {
+                      "title": "VAAPI — Intel/AMD GPU on Linux",
+                      "enum": [
+                        "vaapi"
+                      ]
+                    },
+                    {
+                      "title": "NVENC — NVIDIA GPU",
+                      "enum": [
+                        "nvenc"
+                      ]
+                    },
+                    {
+                      "title": "QuickSync — Intel integrated GPU",
+                      "enum": [
+                        "quicksync"
+                      ]
+                    },
+                    {
+                      "title": "AMF — AMD GPU",
+                      "enum": [
+                        "amf"
+                      ]
+                    },
+                    {
+                      "title": "VideoToolbox — Apple Mac",
+                      "enum": [
+                        "videotoolbox"
+                      ]
+                    },
+                    {
+                      "title": "V4L2 — Raspberry Pi 4+",
+                      "enum": [
+                        "v4l2"
+                      ]
+                    }
+                  ],
+                  "description": "Hardware encoder reduces CPU usage by 70–90%. Requires a custom FFmpeg path with hardware support compiled in."
+                },
+                "qualityProfile": {
+                  "title": "Encoder Quality Profile",
+                  "type": "string",
+                  "default": "",
+                  "oneOf": [
+                    {
+                      "title": "Use encoder defaults (recommended)",
+                      "enum": [
+                        ""
+                      ]
+                    },
+                    {
+                      "title": "Speed — fastest encode, lower quality",
+                      "enum": [
+                        "speed"
+                      ]
+                    },
+                    {
+                      "title": "Balanced — good balance of speed and quality",
+                      "enum": [
+                        "balanced"
+                      ]
+                    },
+                    {
+                      "title": "Quality — best quality, slower encode",
+                      "enum": [
+                        "quality"
+                      ]
+                    }
+                  ],
+                  "description": "Tune encode speed vs quality for hardware encoders. Has no effect on software encoding."
+                },
+                "hwaccelDevice": {
+                  "title": "Hardware Device Path",
+                  "type": "string",
+                  "placeholder": "/dev/dri/renderD128",
+                  "description": "VAAPI device path. Only change if you have multiple GPUs and the wrong one is being used."
                 },
                 "maxStreams": {
                   "title": "Max Concurrent Streams",
@@ -165,143 +350,64 @@
                   "maximum": 4,
                   "description": "Maximum simultaneous streams for this camera."
                 },
-                "qualityPreset": {
-                  "title": "Quality Preset",
+                "source": {
+                  "title": "Custom RTSP Source",
                   "type": "string",
-                  "oneOf": [
-                    { "title": "Not set", "enum": [""] },
-                    { "title": "480p Standard (854x480, 500kbps) — for NVR substreams", "enum": ["480p-standard"] },
-                    { "title": "720p Standard (1280x720, 1500kbps)", "enum": ["720p-standard"] },
-                    { "title": "1080p Standard (1920x1080, 2000kbps)", "enum": ["1080p-standard"] },
-                    { "title": "1080p High Quality (1920x1080, 4000kbps)", "enum": ["1080p-hq"] }
-                  ],
-                  "description": "Strongly recommended. Fixes slow stream starts by forcing a fixed resolution and bitrate from the first HomeKit request, eliminating HomeKit's probe/RECONFIGURE cycle. Choose the preset that matches your NVR stream resolution."
+                  "description": "Override the auto-generated RTSP source. Leave empty to use the NVR-generated URL."
                 },
-                "encoder": {
-                  "title": "Video Encoder",
+                "stillImageSource": {
+                  "title": "Custom Snapshot Source",
                   "type": "string",
-                  "default": "software",
-                  "oneOf": [
-                    { "title": "Software (libx264) — works everywhere, higher CPU", "enum": ["software"] },
-                    { "title": "VAAPI — Intel/AMD GPU on Linux (recommended for low CPU)", "enum": ["vaapi"] },
-                    { "title": "NVENC — NVIDIA GPU", "enum": ["nvenc"] },
-                    { "title": "QuickSync — Intel integrated GPU", "enum": ["quicksync"] },
-                    { "title": "AMF — AMD GPU", "enum": ["amf"] },
-                    { "title": "VideoToolbox — Apple Mac", "enum": ["videotoolbox"] },
-                    { "title": "V4L2 — Raspberry Pi 4+", "enum": ["v4l2"] }
-                  ],
-                  "description": "Hardware encoders reduce CPU usage by 70-90%. Requires a custom FFmpeg path (set in Global Advanced) compiled with hardware support."
-                },
-                "qualityProfile": {
-                  "title": "Encoder Quality Profile",
-                  "type": "string",
-                  "default": "",
-                  "oneOf": [
-                    { "title": "Use Encoder Defaults (Recommended)", "enum": [""] },
-                    { "title": "Speed — fastest encode, lower quality", "enum": ["speed"] },
-                    { "title": "Balanced — good balance of speed and quality", "enum": ["balanced"] },
-                    { "title": "Quality — best quality, slower encode", "enum": ["quality"] }
-                  ],
-                  "description": "Tune encode speed vs quality for hardware encoders. Has no effect on software encoding (libx264 always uses ultrafast/zerolatency). Leave empty to use encoder defaults."
-                },
-                "hwaccelDevice": {
-                  "title": "VAAPI Device Path",
-                  "type": "string",
-                  "placeholder": "/dev/dri/renderD128",
-                  "description": "VAAPI hardware device path. Only relevant when encoder is set to VAAPI. Change only if you have multiple GPUs and the wrong one is selected."
-                },
-                "audio": {
-                  "title": "Enable Audio",
-                  "type": "boolean",
-                  "default": true,
-                  "description": "Enable audio streaming."
-                },
-                "copyAudio": {
-                  "title": "Copy Audio (No Transcoding)",
-                  "type": "boolean",
-                  "default": false,
-                  "description": "Pass audio directly without transcoding. Only enable if your camera already outputs AAC or Opus. Most Dahua cameras output G.711/PCM which requires transcoding — enabling this on an incompatible source will result in no audio."
-                },
-                "recording": {
-                  "title": "Enable HomeKit Secure Video (HKSV)",
-                  "type": "boolean",
-                  "default": false,
-                  "description": "Enable HomeKit Secure Video recording to iCloud on motion. Requires iCloud storage plan and a HomeKit hub."
-                },
-                "prebuffer": {
-                  "title": "Enable Prebuffering",
-                  "type": "boolean",
-                  "default": false,
-                  "description": "Capture video seconds before motion is detected. Requires recording to be enabled."
-                },
-                "prebufferLength": {
-                  "title": "Prebuffer Duration (ms)",
-                  "type": "integer",
-                  "default": 4000,
-                  "minimum": 2000,
-                  "maximum": 8000,
-                  "description": "How many milliseconds of pre-motion video to buffer. Only used when prebuffering is enabled."
+                  "description": "Override the auto-generated snapshot source. Leave empty to use the NVR-generated URL."
                 },
                 "encoderOptions": {
                   "title": "Custom Encoder Options",
                   "type": "string",
-                  "placeholder": "Leave empty — uses Quality Profile automatically",
-                  "description": "Raw FFmpeg encoder flags. When set, completely overrides the Quality Profile above. Examples: VAAPI '-quality 1 -g 30 -bf 0', NVENC '-preset p4 -tune ll', Software '-preset ultrafast -tune zerolatency'. Check Homebridge logs to verify the generated FFmpeg command."
+                  "placeholder": "Leave empty for automatic",
+                  "description": "Manual FFmpeg encoder flags. Overrides quality profile when set. Example: '-preset ultrafast -tune zerolatency'."
                 },
                 "packetSize": {
                   "title": "RTP Packet Size",
                   "type": "integer",
                   "default": 1316,
                   "minimum": 188,
-                  "description": "RTP packet size in bytes. Try smaller values (e.g. 188) if video is choppy on WiFi or across VLANs. Must be a multiple of 188."
+                  "description": "RTP packet size in bytes. Try 1316, 564, or 376 if video is choppy. Must be a multiple of 188."
+                },
+                "videoFilter": {
+                  "title": "Custom Video Filter",
+                  "type": "string",
+                  "placeholder": "Leave empty for automatic",
+                  "description": "Custom FFmpeg video filter. Leave empty — the plugin automatically applies the correct filter based on your encoder."
                 },
                 "debug": {
                   "title": "Debug FFmpeg Output",
                   "type": "boolean",
                   "default": false,
-                  "description": "Log full FFmpeg output to Homebridge log. Useful for diagnosing stream issues."
-                },
-                "manufacturer": {
-                  "title": "Manufacturer",
-                  "type": "string",
-                  "placeholder": "Dahua",
-                  "description": "Manufacturer name shown in HomeKit."
-                },
-                "model": {
-                  "title": "Model",
-                  "type": "string",
-                  "placeholder": "IP Camera",
-                  "description": "Model name shown in HomeKit."
-                },
-                "serialNumber": {
-                  "title": "Serial Number",
-                  "type": "string",
-                  "description": "Serial number shown in HomeKit."
-                },
-                "firmwareRevision": {
-                  "title": "Firmware Revision",
-                  "type": "string",
-                  "description": "Firmware version shown in HomeKit."
-                },
-                "unbridge": {
-                  "title": "Unbridge Camera",
-                  "type": "boolean",
-                  "default": false,
-                  "description": "Run as a separate accessory. May improve performance but requires manual pairing in HomeKit."
-                },
-                "vflip": {
-                  "title": "Flip Vertically",
-                  "type": "boolean",
-                  "default": false,
-                  "description": "Flip the video vertically."
-                },
-                "hflip": {
-                  "title": "Flip Horizontally",
-                  "type": "boolean",
-                  "default": false,
-                  "description": "Flip the video horizontally."
+                  "description": "Log full FFmpeg output to Homebridge logs."
                 }
               }
+            },
+            "manufacturer": {
+              "title": "Manufacturer",
+              "type": "string",
+              "placeholder": "Dahua",
+              "description": "Auto-populated from CGI API. Override if your camera returns incorrect values."
+            },
+            "model": {
+              "title": "Model",
+              "type": "string",
+              "placeholder": "IP Camera",
+              "description": "Auto-populated from CGI API. Override if your camera returns incorrect values."
+            },
+            "serialNumber": {
+              "title": "Serial Number",
+              "type": "string",
+              "description": "Auto-populated from CGI API. Override if your camera returns incorrect values."
+            },
+            "firmwareRevision": {
+              "title": "Firmware Revision",
+              "type": "string",
+              "description": "Auto-populated from CGI API. Override if your camera returns incorrect values."
             }
           }
         }
@@ -311,21 +417,24 @@
   "layout": [
     {
       "type": "section",
-      "title": "NVR Connection",
+      "title": "📡 NVR Connection",
       "expandable": true,
       "expanded": true,
-      "items": ["name", "host", "port", "secure", "username", "password"]
+      "items": [
+        "name",
+        "host",
+        "port",
+        "secure",
+        "username",
+        "password",
+        "forceDiscovery",
+        "streamType",
+        "interfaceName"
+      ]
     },
     {
       "type": "section",
-      "title": "Global Settings",
-      "expandable": true,
-      "expanded": false,
-      "items": ["streamType", "forceDiscovery", "probeOnStartup", "probeTimeout"]
-    },
-    {
-      "type": "section",
-      "title": "Cameras",
+      "title": "📷 Cameras",
       "expandable": true,
       "expanded": true,
       "items": [
@@ -342,32 +451,27 @@
               "expandable": true,
               "expanded": true,
               "items": [
-                "cameras[].channelId",
-                "cameras[].name",
                 "cameras[].enabled",
-                "cameras[].streamType",
-                "cameras[].videoConfig.source",
-                "cameras[].videoConfig.stillImageSource",
-                "cameras[].videoConfig.maxStreams"
+                "cameras[].name",
+                "cameras[].channelId"
               ]
             },
             {
               "key": "cameras[]",
               "type": "section",
-              "title": "Quality & Encoding",
+              "title": "🎬 Video Quality",
               "expandable": true,
-              "expanded": true,
+              "expanded": false,
               "items": [
                 "cameras[].videoConfig.qualityPreset",
-                "cameras[].videoConfig.encoder",
-                "cameras[].videoConfig.qualityProfile",
-                "cameras[].videoConfig.hwaccelDevice"
+                "cameras[].videoConfig.vflip",
+                "cameras[].videoConfig.hflip"
               ]
             },
             {
               "key": "cameras[]",
               "type": "section",
-              "title": "Audio",
+              "title": "🔊 Audio",
               "expandable": true,
               "expanded": false,
               "items": [
@@ -378,7 +482,7 @@
             {
               "key": "cameras[]",
               "type": "section",
-              "title": "Motion Detection",
+              "title": "🎯 Motion Detection",
               "expandable": true,
               "expanded": false,
               "items": [
@@ -389,11 +493,12 @@
             {
               "key": "cameras[]",
               "type": "section",
-              "title": "HomeKit Secure Video (HKSV)",
+              "title": "☁️ iCloud Recording (HKSV)",
               "expandable": true,
               "expanded": false,
               "items": [
                 "cameras[].videoConfig.recording",
+                "cameras[].videoConfig.unbridge",
                 "cameras[].videoConfig.prebuffer",
                 "cameras[].videoConfig.prebufferLength"
               ]
@@ -401,29 +506,45 @@
             {
               "key": "cameras[]",
               "type": "section",
-              "title": "Advanced",
+              "title": "🔧 FFmpeg / Encoder",
               "expandable": true,
               "expanded": false,
               "items": [
-                "cameras[].videoConfig.encoderOptions",
-                "cameras[].videoConfig.packetSize",
-                "cameras[].videoConfig.vflip",
-                "cameras[].videoConfig.hflip",
-                "cameras[].videoConfig.debug"
+                "cameras[].videoConfig.encoder",
+                {
+                  "key": "cameras[].videoConfig.qualityProfile",
+                  "condition": "model.cameras[arrayIndex].videoConfig.encoder && model.cameras[arrayIndex].videoConfig.encoder !== 'software'"
+                },
+                "cameras[].videoConfig.hwaccelDevice"
               ]
             },
             {
               "key": "cameras[]",
               "type": "section",
-              "title": "HomeKit Info",
+              "title": "📋 Override Camera Info",
               "expandable": true,
               "expanded": false,
               "items": [
-                "cameras[].videoConfig.manufacturer",
-                "cameras[].videoConfig.model",
-                "cameras[].videoConfig.serialNumber",
-                "cameras[].videoConfig.firmwareRevision",
-                "cameras[].unbridge"
+                "cameras[].manufacturer",
+                "cameras[].model",
+                "cameras[].serialNumber",
+                "cameras[].firmwareRevision"
+              ]
+            },
+            {
+              "key": "cameras[]",
+              "type": "section",
+              "title": "🐛 Advanced / Debug",
+              "expandable": true,
+              "expanded": false,
+              "items": [
+                "cameras[].videoConfig.source",
+                "cameras[].videoConfig.stillImageSource",
+                "cameras[].videoConfig.encoderOptions",
+                "cameras[].videoConfig.videoFilter",
+                "cameras[].videoConfig.packetSize",
+                "cameras[].videoConfig.maxStreams",
+                "cameras[].videoConfig.debug"
               ]
             }
           ]
@@ -432,10 +553,15 @@
     },
     {
       "type": "section",
-      "title": "Global Advanced",
+      "title": "🔧 Global FFmpeg",
       "expandable": true,
       "expanded": false,
-      "items": ["videoProcessor", "interfaceName", "debugMotion"]
+      "items": [
+        "videoProcessor",
+        "probeOnStartup",
+        "probeTimeout",
+        "debugMotion"
+      ]
     }
   ]
 }
