@@ -152,11 +152,6 @@ export class StreamingDelegate implements CameraStreamingDelegate {
           ':force_original_aspect_ratio=decrease');
       }
       
-      // Add custom video filter if provided (and not already hardware scale)
-      if (this.videoConfig.videoFilter && !this.videoConfig.videoFilter.includes('scale_')) {
-        filters.push(this.videoConfig.videoFilter);
-      }
-      
       if (filters.length > 0) {
         resInfo.videoFilter = filters.join(',');
       }
@@ -300,7 +295,6 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
     let bitrate = request.video.max_bit_rate;
     if (this.videoConfig.maxBitrate && bitrate > this.videoConfig.maxBitrate) bitrate = this.videoConfig.maxBitrate;
-    if (this.videoConfig.minBitrate && bitrate < this.videoConfig.minBitrate) bitrate = this.videoConfig.minBitrate;
     // qualityPreset bitrate floor — prevent HomeKit's probe bitrate (~132kbps) from being used
     if (this.videoConfig.qualityPreset) {
       const presetBitrate = QUALITY_PRESETS[this.videoConfig.qualityPreset]?.maxBitrate;
@@ -510,15 +504,15 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
     // AMF doesn't need special init - it accepts software frames
     
+    // Add -use_wallclock_as_timestamps to fix NVR irregular PTS causing HomeKit buffering delay
     // Modify source to skip audio track if audio is disabled
     let modifiedSource = source;
     if (!this.videoConfig.audio && source.includes('rtsp://')) {
-      // Insert -allowed_media_types video before -i to skip audio during RTSP connection
       modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
     }
-    
-    // Add source (includes -i)
-    ffmpegArgs += modifiedSource;
+
+    // Add source (includes -i), prefixed with wallclock timestamp fix
+    ffmpegArgs += `-use_wallclock_as_timestamps 1 ${modifiedSource}`;
 
     // Video encoding settings
     const isHardwareEncoder = encoder !== 'software';
@@ -527,8 +521,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     const gopParams = gopSize > 0 ? ` -g ${gopSize}` : ''; // Only add if quality profile set
     const bframeParams = bframes >= 0 ? ` -bf ${bframes}` : ''; // Only add if quality profile set (-1 = skip)
     
-    ffmpegArgs += `${this.videoConfig.mapvideo ? ` -map ${this.videoConfig.mapvideo}` : ' -an -sn -dn'
-      } -codec:v ${vcodec
+    ffmpegArgs += `' -an -sn -dn' -codec:v ${vcodec
       }${pixFmt
       }${colorRange
       }${resolution.videoFilter ? ` -filter:v ${resolution.videoFilter}` : ''
@@ -554,7 +547,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
         const audioFilter = useAudioCopy ? '' : ' -af aresample=resampler=soxr';
 
         ffmpegArgs // Audio
-          += `${(this.videoConfig.mapaudio ? ` -map ${this.videoConfig.mapaudio}` : ' -vn -sn -dn')
+          += `${ ' -vn -sn -dn'
           + (useAudioCopy
             ? ' -codec:a copy'
             : request.audio.codec === AudioStreamingCodecType.OPUS
@@ -607,5 +600,6 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
   }
 }
+
 
 
