@@ -97,6 +97,12 @@ export interface DiscoveredChannel {
   name: string;
   inputPort: number;
   enabled: boolean;
+  deviceInfo?: {
+    manufacturer?: string;
+    model?: string;
+    serialNumber?: string;
+    firmwareVersion?: string;
+  };
 }
 
 export interface DetectedStreamInfo {
