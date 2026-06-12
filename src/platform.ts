@@ -90,9 +90,9 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
 
     this.discovery = new DahuaDiscovery(
       this.api_client,
+      this.platformConfig.host,
       this.platformConfig.port || DEFAULT_PLATFORM_CONFIG.port,
       this.platformConfig.secure || DEFAULT_PLATFORM_CONFIG.secure,
-      this.platformConfig.host,
       this.platformConfig.username,
       this.platformConfig.password,
       this.log,
@@ -271,6 +271,7 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
     name: string, 
     streamType: StreamType,
     deviceInfo?: { manufacturer?: string; model?: string; serialNumber?: string; firmwareVersion?: string },
+    enabled = true,
   ): CameraConfig {
     if (!this.discovery) throw new Error('Discovery not initialized');
 
@@ -508,3 +509,4 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
     this.log.info('Dahua platform shutdown complete');
   }
 }
+
