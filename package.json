@@ -1,6 +1,6 @@
 {
   "name": "homebridge-dahua-ultimate",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Homebridge plugin for Dahua NVR cameras with CGI API discovery, motion detection, and FFmpeg streaming",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -56,5 +56,6 @@
   },
   "homepage": "https://github.com/pit5bul/homebridge-dahua-ultimate#readme"
 }
+
 
 
