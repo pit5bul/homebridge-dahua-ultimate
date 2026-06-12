@@ -20,6 +20,7 @@ export const HOMEKIT_MAX_FPS = 30;
  * Maps user-friendly presets to concrete video parameters
  */
 export const QUALITY_PRESETS = {
+  '480p-standard':  { maxWidth: 854,  maxHeight: 480,  maxBitrate: 500 },
   '720p-standard':  { maxWidth: 1280, maxHeight: 720,  maxBitrate: 1500 },
   '1080p-standard': { maxWidth: 1920, maxHeight: 1080, maxBitrate: 2000 },
   '1080p-hq':       { maxWidth: 1920, maxHeight: 1080, maxBitrate: 4000 },
@@ -87,13 +88,13 @@ export const STREAM_TYPE_SUFFIX = {
 export const DEFAULT_RTSP_PORT = 554;
 
 /**
- * Motion event types from ISAPI
+ * Motion event types from Dahua CGI API
  */
 export const MOTION_EVENT_TYPES = [
-  'VMD',            // Video Motion Detection
-  'linedetection',  // Line Crossing Detection
-  'fielddetection', // Intrusion Detection
-  'regionEntrance', // Region Entrance
-  'regionExiting',  // Region Exiting
-  'shelteralarm',   // Video Tampering
+  'VideoMotion',
+  'CrossLineDetection',
+  'CrossRegionDetection',
+  'AlarmLocal',
+  'VideoLoss',
+  'VideoBlind',
 ];
