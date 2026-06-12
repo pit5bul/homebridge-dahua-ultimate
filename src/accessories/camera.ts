@@ -59,12 +59,14 @@ export class CameraAccessory {
     const cameraControllerOptions = {
       cameraStreamCount: cameraConfig.videoConfig?.maxStreams || 2,
       delegate: this.streamingDelegate,
+      const maxFPS = cameraConfig.videoConfig?.maxFPS || 15;
+
       streamingOptions: {
         supportedCryptoSuites: [this.hap.SRTPCryptoSuites.AES_CM_128_HMAC_SHA1_80],
         video: {
           resolutions: [
-            [1920, 1080, 30], [1280, 720, 30], [640, 480, 30], [640, 360, 30],
-            [480, 360, 30], [480, 270, 30], [320, 240, 30], [320, 240, 15], [320, 180, 30],
+            [1920, 1080, maxFPS], [1280, 720, maxFPS], [640, 480, maxFPS], [640, 360, maxFPS],
+            [480, 360, maxFPS], [480, 270, maxFPS], [320, 240, maxFPS], [320, 240, Math.min(maxFPS, 15)], [320, 180, maxFPS],
           ] as [number, number, number][],
           codec: {
             profiles: [this.hap.H264Profile.BASELINE, this.hap.H264Profile.MAIN, this.hap.H264Profile.HIGH],
@@ -103,17 +105,17 @@ export class CameraAccessory {
               ],
             },
             resolutions: [
-              [320, 180, 30],
-              [320, 240, 15],
-              [320, 240, 30],
-              [480, 270, 30],
-              [480, 360, 30],
-              [640, 360, 30],
-              [640, 480, 30],
-              [1280, 720, 30],
-              [1280, 960, 30],
-              [1920, 1080, 30],
-              [1600, 1200, 30],
+              [320, 180, maxFPS],
+              [320, 240, Math.min(maxFPS, 15)],
+              [320, 240, maxFPS],
+              [480, 270, maxFPS],
+              [480, 360, maxFPS],
+              [640, 360, maxFPS],
+              [640, 480, maxFPS],
+              [1280, 720, maxFPS],
+              [1280, 960, maxFPS],
+              [1920, 1080, maxFPS],
+              [1600, 1200, maxFPS],
             ] as [number, number, number][],
           },
           audio: {
@@ -176,3 +178,4 @@ export class CameraAccessory {
     this.streamingDelegate.stopAllStreams();
   }
 }
+
