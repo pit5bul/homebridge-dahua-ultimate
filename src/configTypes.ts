@@ -18,7 +18,7 @@ export type QualityProfile = '' | 'speed' | 'balanced' | 'quality';
 /**
  * Quality preset — maps to fixed resolution + bitrate
  */
-export type QualityPreset = '720p-standard' | '1080p-standard' | '1080p-hq';
+export type QualityPreset = '480p-standard' | '720p-standard' | '1080p-standard' | '1080p-hq';
 
 /**
  * Platform configuration interface
@@ -192,3 +192,4 @@ export interface FfprobeFormat {
   size?: string;
   bit_rate?: string;
 }
+
