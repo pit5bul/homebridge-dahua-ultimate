@@ -6,6 +6,8 @@
 
 Homebridge plugin for Dahua NVR cameras with automatic discovery, motion detection, and hardware-accelerated streaming.
 
+> **v1.9.9** — Pre-release candidate for v2.0.0. All core functionality tested and stable.
+
 ## Features
 
 - **Automatic camera discovery** — connects to your Dahua NVR and discovers all cameras automatically
