@@ -56,11 +56,11 @@ export class CameraAccessory {
       );
     }
 
+    const maxFPS = cameraConfig.videoConfig?.maxFPS || 15;
+
     const cameraControllerOptions = {
       cameraStreamCount: cameraConfig.videoConfig?.maxStreams || 2,
       delegate: this.streamingDelegate,
-      const maxFPS = cameraConfig.videoConfig?.maxFPS || 15;
-
       streamingOptions: {
         supportedCryptoSuites: [this.hap.SRTPCryptoSuites.AES_CM_128_HMAC_SHA1_80],
         video: {
@@ -178,4 +178,5 @@ export class CameraAccessory {
     this.streamingDelegate.stopAllStreams();
   }
 }
+
 
