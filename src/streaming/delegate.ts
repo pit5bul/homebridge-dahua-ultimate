@@ -469,6 +469,9 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
     }
     
+    // Add wallclock timestamps to fix NVR timestamp jitter causing frame drops
+    ffmpegArgs += '-use_wallclock_as_timestamps 1 ';
+
     // Add source (includes -i)
     ffmpegArgs += modifiedSource;
 
@@ -563,3 +566,4 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
   }
 }
+
