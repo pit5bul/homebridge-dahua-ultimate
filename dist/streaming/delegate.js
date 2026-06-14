@@ -414,6 +414,8 @@ class StreamingDelegate {
             // Insert -allowed_media_types video before -i to skip audio during RTSP connection
             modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
         }
+        // Reduce FFmpeg stream analysis time to minimize startup delay
+        modifiedSource = modifiedSource.replace(/-i\s+/, '-probesize 32 -analyzeduration 0 -i ');
         // Add source (includes -i)
         ffmpegArgs += modifiedSource;
         // Video encoding settings
