@@ -469,6 +469,8 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
     }
     
+    // Reduce stream analysis time to minimize startup delay
+    modifiedSource = modifiedSource.replace(/-i\s+/, '-probesize 32 -analyzeduration 0 -i ');
     // Add source (includes -i)
     ffmpegArgs += modifiedSource;
 
@@ -563,5 +565,6 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
   }
 }
+
 
 
