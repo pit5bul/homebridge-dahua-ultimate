@@ -469,16 +469,17 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
     }
     
-    // Stream analysis tuning — minimize startup delay while ensuring codec detection
-    // H.265 (HEVC) cameras include stream params in the SDP header, so probesize 32 / analyzeduration 0 is safe.
-    // H.264 cameras require more data to detect resolution; use higher values or let the user override.
-    const detectedCodec = this.cameraConfig.detected?.videoCodec?.toLowerCase() || '';
-    const isHevc = detectedCodec === 'hevc' || detectedCodec === 'h265';
-    const defaultProbeSize = isHevc ? 32 : 500000;
-    const defaultAnalyzeDuration = isHevc ? 0 : 1000000;
-    const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : defaultProbeSize;
-    const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : defaultAnalyzeDuration;
-    modifiedSource = modifiedSource.replace(/-i\s+/, `-probesize ${probeSize} -analyzeduration ${analyzeDuration} -i `);
+    // Only inject probesize/analyzeduration if user explicitly set them in config.
+    // Do not auto-inject defaults — FFmpeg handles all camera types correctly with its own defaults.
+    // For RTSP sources, add -stimeout to prevent indefinite hangs on connection issues.
+    if (this.videoConfig.probeSize !== undefined || this.videoConfig.analyzeDuration !== undefined) {
+      const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : 5000000;
+      const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : 5000000;
+      modifiedSource = modifiedSource.replace(/-i\s+/, `-probesize ${probeSize} -analyzeduration ${analyzeDuration} -i `);
+    }
+    if (source.includes('rtsp://')) {
+      modifiedSource = modifiedSource.replace(/-i\s+/, '-stimeout 5000000 -i ');
+    }
     // Add source (includes -i)
     ffmpegArgs += modifiedSource;
 
