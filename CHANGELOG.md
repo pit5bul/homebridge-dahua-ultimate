@@ -2,10 +2,31 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.0] - 2026-07-02
+
+### Added
+- **Per-camera `probeSize` and `analyzeDuration` config fields** — control how much data FFmpeg reads before starting a stream. Exposed in the Advanced/Debug section of each camera in Config UI X.
+- **Smart codec-based defaults** — H.265 (HEVC) cameras automatically use `probeSize: 32` and `analyzeDuration: 0` for fastest possible startup. H.264 cameras automatically use `probeSize: 500000` and `analyzeDuration: 1000000` to reliably detect stream parameters and avoid FFmpeg crashes.
+- **NVR audio codec support** — G.711A (pcm_alaw) audio from the NVR is now correctly detected and transcoded to AAC-ELD for HomeKit.
+
+### Fixed
+- **H.264 cameras crashing on stream start** (e.g. Doorbell, outside cameras) — `probesize 32` was too small to detect H.264 stream parameters causing FFmpeg to exit with `Output file does not contain any stream`. Smart defaults now prevent this.
+- **10+ second stream startup delay** — `probesize` and `analyzeduration` are now applied to all streams, eliminating FFmpeg's default 5-second analysis phase.
+- **Frame drops with audio timestamp jitter** — removed `-use_wallclock_as_timestamps` which caused mass frame drops with G.711A audio.
+
+### Changed
+- Version bumped to 2.0.0 — marks stable production release with all core issues resolved.
+
+## [1.9.97] - 2026-06-14
+
+### Fixed
+- `-probesize 32 -analyzeduration 0` added to FFmpeg input to reduce stream startup delay from 10+ seconds to under 2 seconds.
+- Removed `-use_wallclock_as_timestamps 1` which caused frame drops.
+
 ## [1.9.9] - 2026-06-13
 
 ### Added
-- **`maxFPS` now in Config UI X** — visible in the Advanced section of each camera's configuration. Default 15, range 1-30.
+- `maxFPS` now visible in Config UI X (Advanced section). Default 15, range 1-30.
 
 ### Notes
 - Pre-release candidate for v2.0.0. All core functionality tested and working.
@@ -13,10 +34,7 @@ All notable changes to homebridge-dahua-ultimate will be documented in this file
 ## [1.3.3] - 2026-06-13
 
 ### Added
-- **`maxFPS` config option** — defaults to `15` to match Dahua NVR output. Fixes slow stream startup caused by HomeKit buffering duplicate frames when 30fps was advertised but NVR sends 15fps.
-
-### Fixed
-- **Slow stream startup** — `maxFPS` now defaults to 15.
+- `maxFPS` config option — defaults to 15 to match Dahua NVR output. Fixes slow stream startup caused by HomeKit buffering duplicate frames when 30fps was advertised but NVR sends 15fps.
 
 ## [1.3.2] - 2026-06-12
 
@@ -54,12 +72,12 @@ All notable changes to homebridge-dahua-ultimate will be documented in this file
 ## [1.1.9] - 2026-06-11
 
 ### Fixed
-- 20+ second stream buffering delay (reverted in v1.3.0)
+- 20+ second stream buffering delay
 
 ## [1.1.8] - 2026-06-10
 
 ### Added
-- `qualityPreset` option (reverted in v1.3.0)
+- `qualityPreset` option
 
 ## [1.1.7] - 2026-06-09
 
