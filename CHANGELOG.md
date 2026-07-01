@@ -2,6 +2,16 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.1] - 2026-07-02
+
+### Changed
+- **Removed automatic probesize/analyzeduration injection** — the plugin no longer forces these values on all cameras by default. FFmpeg's own defaults handle all camera types correctly including H.264 and H.265. Per-camera overrides still work via `probeSize` and `analyzeDuration` in videoConfig.
+- **Added `-stimeout 5000000` to all RTSP sources** — prevents FFmpeg from hanging indefinitely on connection issues. 5 second timeout applied automatically.
+
+### Fixed
+- **H.264 cameras with unusual streams no longer crash** — the previous auto-injection of `probesize 500000` was insufficient for some H.264 cameras (e.g. cameras that don't send keyframes within the analyze window). Removing the injection lets FFmpeg use its full defaults.
+- **Custom `source` overrides now work correctly** — probesize injection was conflicting with user-supplied source args.
+
 ## [2.0.0] - 2026-07-02
 
 ### Added
