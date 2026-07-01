@@ -6,7 +6,7 @@
 
 Homebridge plugin for Dahua NVR cameras with automatic discovery, motion detection, and hardware-accelerated streaming.
 
-> **v2.0.0** — Stable production release. All core issues resolved including H.264 camera support and fast stream startup.
+> **v2.0.1** — Improved camera compatibility. Removed auto probesize injection; FFmpeg defaults now used for all cameras.
 
 ## Features
 
