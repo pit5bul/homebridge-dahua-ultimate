@@ -6,7 +6,7 @@
 
 Homebridge plugin for Dahua NVR cameras with automatic discovery, motion detection, and hardware-accelerated streaming.
 
-> **v1.9.9** — Pre-release candidate for v2.0.0. All core functionality tested and stable.
+> **v2.0.0** — Stable production release. All core issues resolved including H.264 camera support and fast stream startup.
 
 ## Features
 
@@ -79,6 +79,8 @@ On first startup the plugin will auto-discover all cameras and populate the conf
 | `copyAudio` | boolean | false | Pass audio through without transcoding |
 | `recording` | boolean | false | Enable HKSV recording |
 | `prebuffer` | boolean | false | Enable HKSV prebuffer |
+| `probeSize` | number | auto | Bytes FFmpeg reads to detect stream params. H.265: `32`, H.264: `500000`. Leave unset for auto. |
+| `analyzeDuration` | number | auto | Microseconds FFmpeg analyses the stream. H.265: `0`, H.264: `1000000`. Leave unset for auto. |
 | `debug` | boolean | false | Verbose FFmpeg logging |
 
 ## Frame Rate
@@ -94,6 +96,28 @@ If your NVR streams at a different frame rate, set `maxFPS` accordingly:
   }
 }
 ```
+
+## Stream Analysis (probeSize / analyzeDuration)
+
+FFmpeg reads a small amount of stream data before it starts encoding. By default the plugin auto-detects the right values:
+
+| Camera codec | probeSize | analyzeDuration | Startup |
+|---|---|---|---|
+| H.265 (HEVC) — most Dahua NVR cameras | `32` | `0` | Fastest |
+| H.264 — some cameras (Doorbell, external) | `500000` | `1000000` | ~1 second |
+
+You can override per camera in Config UI X under **Advanced / Debug**, or in config.json:
+
+```json
+{
+  "videoConfig": {
+    "probeSize": 32,
+    "analyzeDuration": 0
+  }
+}
+```
+
+Use `probeSize: 32` / `analyzeDuration: 0` only if your camera is H.265. For H.264 cameras, the auto default (`500000` / `1000000`) is recommended.
 
 ## Quality Presets
 
