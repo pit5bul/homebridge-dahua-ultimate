@@ -116,6 +116,12 @@ export interface VideoConfig {
   // Advanced
   packetSize?: number;
 
+  // Stream analysis (probesize/analyzeduration)
+  // H.265 cameras: use probeSize: 32, analyzeDuration: 0 for fastest startup
+  // H.264 cameras: use probeSize: 500000, analyzeDuration: 1000000 (or leave unset for auto)
+  probeSize?: number;
+  analyzeDuration?: number;
+
   // Debug
   debug?: boolean;
   debugReturn?: boolean;
