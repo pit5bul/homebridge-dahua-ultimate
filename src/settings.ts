@@ -38,6 +38,7 @@ export const DEFAULT_VIDEO_CONFIG = {
   maxStreams: 2,
   maxWidth: HOMEKIT_MAX_WIDTH,
   maxHeight: HOMEKIT_MAX_HEIGHT,
+  maxFPS: 15,
   maxBitrate: 2000,
   encoder: 'software' as const,
   audio: true,
@@ -66,20 +67,11 @@ export const DEFAULT_PLATFORM_CONFIG = {
  */
 export const DEFAULT_CAMERA_CONFIG = {
   motion: true,
-  motionTimeout: 1,
+  motionTimeout: 10,  // NVR sends explicit stop events; 10s fallback prevents stuck motion state
   unbridge: false,
   enabled: true,
   manufacturer: 'Dahua',
   model: 'IP Camera',
-};
-
-/**
- * Stream type to RTSP channel suffix mapping
- */
-export const STREAM_TYPE_SUFFIX = {
-  mainstream: '01',
-  substream: '02',
-  thirdstream: '03',
 };
 
 /**
