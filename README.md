@@ -6,7 +6,7 @@
 
 Homebridge plugin for Dahua NVR cameras with automatic discovery, motion detection, and hardware-accelerated streaming.
 
-> **v2.0.1** — Improved camera compatibility. Removed auto probesize injection; FFmpeg defaults now used for all cameras.
+> **v2.0.3** — Snapshots now use direct HTTP digest auth — no FFmpeg, no timeouts. Multiple bug fixes across streaming, events and config.
 
 ## Features
 
@@ -65,7 +65,7 @@ On first startup the plugin will auto-discover all cameras and populate the conf
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `source` | string | — | Full FFmpeg source args including `-i` |
-| `stillImageSource` | string | — | FFmpeg args for snapshot |
+| `stillImageSource` | string | — | Legacy FFmpeg snapshot source. Not needed — plugin now fetches snapshots directly via digest auth. |
 | `maxStreams` | number | 2 | Max concurrent streams |
 | `maxWidth` | number | 1920 | Max stream width |
 | `maxHeight` | number | 1080 | Max stream height |
@@ -99,25 +99,24 @@ If your NVR streams at a different frame rate, set `maxFPS` accordingly:
 
 ## Stream Analysis (probeSize / analyzeDuration)
 
-FFmpeg reads a small amount of stream data before it starts encoding. By default the plugin auto-detects the right values:
+By default the plugin uses FFmpeg's own defaults for stream analysis, which work correctly for all camera types. You only need to set these if a specific camera has unusual stream parameters:
 
-| Camera codec | probeSize | analyzeDuration | Startup |
-|---|---|---|---|
-| H.265 (HEVC) — most Dahua NVR cameras | `32` | `0` | Fastest |
-| H.264 — some cameras (Doorbell, external) | `500000` | `1000000` | ~1 second |
+| Camera codec | Recommended probeSize | Recommended analyzeDuration |
+|---|---|---|
+| H.265 (HEVC) | not needed (FFmpeg detects from SDP) | not needed |
+| H.264 standard | not needed | not needed |
+| H.264 with unusual SPS timing | `500000` | `1000000` |
 
-You can override per camera in Config UI X under **Advanced / Debug**, or in config.json:
+Override per camera in Config UI X under **Advanced / Debug**, or in config.json:
 
 ```json
 {
   "videoConfig": {
-    "probeSize": 32,
-    "analyzeDuration": 0
+    "probeSize": 500000,
+    "analyzeDuration": 1000000
   }
 }
 ```
-
-Use `probeSize: 32` / `analyzeDuration: 0` only if your camera is H.265. For H.264 cameras, the auto default (`500000` / `1000000`) is recommended.
 
 ## Quality Presets
 
@@ -172,7 +171,7 @@ Ensure `maxFPS` matches your NVR's actual output frame rate (default is 15). A m
 Enable `debug: true` in `videoConfig` and check Homebridge logs for FFmpeg errors.
 
 ### Snapshots failing
-Verify `port` and `secure` match your NVR. Doorbell channel snapshots may consistently time out on some NVR firmware — this is an NVR limitation.
+Verify `port` and `secure` match your NVR. Snapshots now use direct digest auth HTTP — if a channel still fails, check the camera is online in the NVR web UI.
 
 ### Hardware acceleration not working
 Verify your FFmpeg build includes the required encoder:
