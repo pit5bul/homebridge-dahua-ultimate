@@ -28,7 +28,8 @@ export interface DahuaPlatformConfig extends PlatformConfig {
 
   // NVR Connection
   host: string;
-  port?: number;
+  port?: number;       // HTTP/HTTPS port (default 80 or 443)
+  rtspPort?: number;   // RTSP port (default 554)
   secure?: boolean;
   username: string;
   password: string;
@@ -124,7 +125,6 @@ export interface VideoConfig {
 
   // Debug
   debug?: boolean;
-  debugReturn?: boolean;
 
   // HomeKit Secure Video (HKSV)
   recording?: boolean;
