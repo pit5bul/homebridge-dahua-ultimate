@@ -96,6 +96,7 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
       this.platformConfig.username,
       this.platformConfig.password,
       this.log,
+      this.platformConfig.rtspPort || 554,
     );
 
     try {
