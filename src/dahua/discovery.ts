@@ -23,6 +23,7 @@ export class DahuaDiscovery {
     private readonly username: string,
     private readonly password: string,
     private readonly log: Logger,
+    private readonly rtspPort: number = 554,
   ) {}
 
   /**
@@ -40,7 +41,7 @@ export class DahuaDiscovery {
       const deviceType = await this.api.get<Record<string, string>>('/cgi-bin/magicBox.cgi?action=getDeviceType');
       
       return {
-        name: sysInfo.deviceName || sysInfo.machineName,
+        name: sysInfo.machineName || sysInfo.deviceName,  // Dahua returns machineName
         model: deviceType.type || sysInfo.deviceType,
         serialNumber: sysInfo.serialNumber,
         firmwareVersion: sysInfo.softwareVersion,
@@ -173,7 +174,8 @@ export class DahuaDiscovery {
     const encodedUsername = encodeURIComponent(this.username);
     const encodedPassword = encodeURIComponent(this.password);
 
-    return `rtsp://${encodedUsername}:${encodedPassword}@${this.host}:${554}/cam/realmonitor?channel=${channelId}&subtype=${subtype}`;
+    const rtspPort = this.rtspPort || 554;
+    return `rtsp://${encodedUsername}:${encodedPassword}@${this.host}:${rtspPort}/cam/realmonitor?channel=${channelId}&subtype=${subtype}`;
   }
 
   /**
@@ -196,18 +198,14 @@ export class DahuaDiscovery {
 
   /**
    * Build FFmpeg still image source string for a channel
+   * @deprecated Snapshots should use DahuaApi.getSnapshot() for proper digest auth.
+   * This method is kept for backward compatibility with existing stored configs.
    */
   buildFfmpegStillSource(channelId: number, _streamType: StreamType = "mainstream"): string {
-    // Dahua snapshot API uses 1-based channel indexing (same as RTSP)
-    // D1 = channel=1, D2 = channel=2, etc.
-    
     const encodedUsername = encodeURIComponent(this.username);
     const encodedPassword = encodeURIComponent(this.password);
-    
-    // Auto-detect HTTPS if port is 443
     const protocol = (this.port === 443 || this.secure) ? 'https' : 'http';
     const snapshotUrl = `${protocol}://${encodedUsername}:${encodedPassword}@${this.host}:${this.port}/cgi-bin/snapshot.cgi?channel=${channelId}`;
-    
     return `-i ${snapshotUrl}`;
   }
 }
