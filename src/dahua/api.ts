@@ -50,6 +50,9 @@ export class DahuaApi {
    */
   async getSnapshot(channelId: number): Promise<Buffer> {
     const path = `/cgi-bin/snapshot.cgi?channel=${channelId}`;
+    // Reset digest auth so each snapshot does a fresh 401 challenge/response.
+    // Reusing a stale nonce across concurrent requests causes 400/500 from the NVR.
+    this.digestAuth = undefined;
     const result = await this.requestRaw('GET', path, false);
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
