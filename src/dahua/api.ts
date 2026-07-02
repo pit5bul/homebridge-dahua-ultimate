@@ -45,6 +45,28 @@ export class DahuaApi {
   }
 
   /**
+   * Fetch a JPEG snapshot directly via digest auth — no FFmpeg required.
+   * Dahua NVR returns raw JPEG bytes from /cgi-bin/snapshot.cgi?channel=N
+   */
+  async getSnapshot(channelId: number): Promise<Buffer> {
+    const path = `/cgi-bin/snapshot.cgi?channel=${channelId}`;
+    const result = await this.requestRaw('GET', path, false);
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      result.response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      result.response.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        if (buf.length === 0) {
+          reject(new Error('Empty snapshot response'));
+        } else {
+          resolve(buf);
+        }
+      });
+      result.response.on('error', reject);
+    });
+  }
+
+  /**
    * Open a persistent connection for event stream
    */
   openEventStream(
@@ -179,7 +201,7 @@ export class DahuaApi {
         path,
         method,
         headers: {
-          'Accept': 'text/plain',
+          'Accept': '*/*',
         },
         timeout: keepAlive ? 0 : 30000,
       };
