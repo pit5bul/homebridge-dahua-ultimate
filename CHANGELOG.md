@@ -2,6 +2,33 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.3] - 2026-07-03
+
+### Fixed
+- **Snapshots now use direct HTTP digest authentication** — replaced FFmpeg-based snapshot fetching with a direct HTTP request using the existing `DahuaApi` digest auth client. This fixes all snapshot timeout issues on HTTPS (port 443) and eliminates the concurrent FFmpeg process overload on the NVR that was causing timeouts even on previously working channels.
+- **`copyAudio` no longer sends `-b:a` bitrate flag** — bitrate is meaningless with stream copy and was incorrectly included.
+
+### Changed
+- `DahuaApi.getSnapshot(channelId)` — new public method returning raw JPEG bytes via digest auth, no FFmpeg involved.
+- `StreamingDelegate` now accepts `DahuaApi` instance and uses it for all snapshots. FFmpeg snapshot fallback remains for edge cases where no API client is available.
+
+## [2.0.2] - 2026-07-03
+
+### Fixed
+- **FFmpeg input arg ordering** — `-allowed_media_types`, `-stimeout`, and `-probesize`/`-analyzeduration` are now injected in the correct order before `-i`. Previous chained regex replacements could produce wrong ordering.
+- **Stdout pipe drain** — FFmpeg streaming process stdout (`-progress pipe:1`) is now properly drained to prevent pipe buffer blocking on long streams.
+- **`motionTimeout` default raised from 1s to 10s** — prevents motion state clearing before the NVR sends an explicit stop event.
+- **RTSP port hardcoded to 554** — now configurable via `rtspPort` in platform config (default 554).
+- **Device name** — `machineName` is now the primary key from `magicBox.cgi?action=getSystemInfo` (Dahua returns this, not `deviceName`).
+- **`VideoLoss`/`VideoBlind` removed from event subscription** — these were subscribed but silently discarded. Subscription now only includes handled events: `VideoMotion`, `CrossLineDetection`, `CrossRegionDetection`, `AlarmLocal`.
+- **Event buffer trimming** — more robust buffer cleanup after parsing multipart event stream chunks.
+- **`maxFPS: 15`** added to `DEFAULT_VIDEO_CONFIG` so it is always applied even if not set in camera config.
+- **Dead `STREAM_TYPE_SUFFIX` constant removed** — this was a Hikvision leftover using `01`/`02`/`03` format instead of Dahua's `subtype=0/1/2`.
+- **`debugReturn` config field removed** — was defined but never used anywhere in the codebase.
+
+### Added
+- **`rtspPort` platform config field** — allows configuring a non-standard RTSP port (default 554).
+
 ## [2.0.1] - 2026-07-02
 
 ### Changed
