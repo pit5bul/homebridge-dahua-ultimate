@@ -13,6 +13,7 @@ import {
   VideoInfo,
 } from 'homebridge';
 import { spawn, ChildProcess } from 'child_process';
+import { DahuaApi } from '../dahua/api';
 import { CameraConfig, VideoConfig } from '../configTypes';
 import {
   DEFAULT_VIDEO_CONFIG,
@@ -54,6 +55,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
   private readonly hap: HAP;
   private readonly videoConfig: VideoConfig;
   private readonly videoProcessor: string;
+  private readonly dahuaApi?: DahuaApi;
   private pendingSessions: Map<string, SessionInfo> = new Map();
   private activeSessions: Map<string, ActiveSession> = new Map();
   private cachedSnapshot?: Buffer;
@@ -64,10 +66,12 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     private readonly cameraConfig: CameraConfig,
     videoProcessor: string,
     private readonly log: Logger,
+    dahuaApi?: DahuaApi,
   ) {
     this.hap = hap;
     this.videoProcessor = videoProcessor;
     this.videoConfig = { ...DEFAULT_VIDEO_CONFIG, ...cameraConfig.videoConfig };
+    this.dahuaApi = dahuaApi;
   }
 
   private determineResolution(request: SnapshotRequest | VideoInfo, isSnapshot: boolean): ResolutionInfo {
@@ -156,7 +160,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
   async handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): Promise<void> {
     const resolution = this.determineResolution(request, true);
-    this.log.debug(`Snapshot request: ${request.width}x${request.height} -> ${resolution.width}x${resolution.height}`, this.cameraConfig.name);
+    this.log.info(`Snapshot request: ${request.width}x${request.height} -> ${resolution.width}x${resolution.height}`, this.cameraConfig.name);
 
     const now = Date.now();
     if (this.cachedSnapshot && now - this.cachedSnapshotTime < 3000) {
@@ -165,6 +169,24 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       return;
     }
 
+    // Use direct HTTP digest auth if DahuaApi is available — no FFmpeg needed.
+    // This is the correct approach: Dahua NVR returns JPEG directly from snapshot.cgi.
+    if (this.dahuaApi) {
+      try {
+        this.log.info(`Snapshot fetch: channel=${this.cameraConfig.channelId}`, this.cameraConfig.name);
+        const jpeg = await this.dahuaApi.getSnapshot(this.cameraConfig.channelId);
+        this.cachedSnapshot = jpeg;
+        this.cachedSnapshotTime = Date.now();
+        this.log.info(`Snapshot captured: ${jpeg.length} bytes`, this.cameraConfig.name);
+        callback(undefined, jpeg);
+      } catch (err) {
+        this.log.error(`Snapshot failed: ${err}`, this.cameraConfig.name);
+        callback(err as Error);
+      }
+      return;
+    }
+
+    // Fallback: FFmpeg (used only if DahuaApi not available, e.g. custom source override)
     const source = this.videoConfig.stillImageSource || this.videoConfig.source;
     if (!source) {
       this.log.error('No source configured', this.cameraConfig.name);
@@ -203,11 +225,10 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       }
       this.cachedSnapshot = snapshot;
       this.cachedSnapshotTime = Date.now();
-      this.log.debug(`Snapshot captured: ${snapshot.length} bytes`, this.cameraConfig.name);
+      this.log.info(`Snapshot captured: ${snapshot.length} bytes`, this.cameraConfig.name);
       callback(undefined, snapshot);
     });
 
-    // Outer timeout slightly longer than FFmpeg's -timeout 8000000 (8s) to let FFmpeg exit cleanly first
     setTimeout(() => { if (!ffmpeg.killed) { ffmpeg.kill('SIGKILL'); this.log.warn('Snapshot timeout', this.cameraConfig.name); } }, 10000);
   }
 
