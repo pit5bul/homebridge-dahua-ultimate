@@ -96,7 +96,6 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
       this.platformConfig.username,
       this.platformConfig.password,
       this.log,
-      this.platformConfig.rtspPort || 554,
     );
 
     try {
@@ -405,7 +404,7 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
 
     }
 
-    const cameraAccessory = new CameraAccessory(this.api, accessory, camera, this.ffmpegPath, this.log);
+    const cameraAccessory = new CameraAccessory(this.api, accessory, camera, this.ffmpegPath, this.log, this.api_client);
     this.cameraAccessories.set(camera.channelId, cameraAccessory);
 
     if (isNew) {
