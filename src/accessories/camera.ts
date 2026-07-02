@@ -8,6 +8,7 @@ import {
   AudioRecordingSamplerate,
 } from 'homebridge';
 import { CameraConfig } from '../configTypes';
+import { DahuaApi } from '../dahua/api';
 import { StreamingDelegate } from '../streaming/delegate';
 import { RecordingDelegate } from '../streaming/recordingDelegate';
 import { DEFAULT_CAMERA_CONFIG } from '../settings';
@@ -27,6 +28,7 @@ export class CameraAccessory {
     private readonly cameraConfig: CameraConfig,
     videoProcessor: string,
     private readonly log: Logger,
+    dahuaApi?: DahuaApi,
   ) {
     this.hap = api.hap;
     this.api = api;
@@ -42,7 +44,7 @@ export class CameraAccessory {
       }
     }
 
-    this.streamingDelegate = new StreamingDelegate(this.hap, cameraConfig, videoProcessor, log);
+    this.streamingDelegate = new StreamingDelegate(this.hap, cameraConfig, videoProcessor, log, dahuaApi);
 
     // Create recording delegate if HKSV is enabled
     if (cameraConfig.videoConfig?.recording) {
