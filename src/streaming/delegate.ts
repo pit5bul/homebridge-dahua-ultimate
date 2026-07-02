@@ -207,7 +207,8 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       callback(undefined, snapshot);
     });
 
-    setTimeout(() => { if (!ffmpeg.killed) { ffmpeg.kill('SIGKILL'); this.log.warn('Snapshot timeout', this.cameraConfig.name); } }, 15000);
+    // Outer timeout slightly longer than FFmpeg's -timeout 8000000 (8s) to let FFmpeg exit cleanly first
+    setTimeout(() => { if (!ffmpeg.killed) { ffmpeg.kill('SIGKILL'); this.log.warn('Snapshot timeout', this.cameraConfig.name); } }, 10000);
   }
 
   async prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): Promise<void> {
@@ -330,6 +331,9 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     const ffmpeg = spawn(this.videoProcessor, args, { env: process.env });
     const activeSession: ActiveSession = { sessionInfo, videoProcess: ffmpeg };
     this.activeSessions.set(request.sessionID, activeSession);
+
+    // Always drain stdout (FFmpeg -progress pipe:1 output) to prevent pipe buffer blocking
+    ffmpeg.stdout?.on('data', (_data: Buffer) => { /* drain progress output */ });
 
     ffmpeg.stderr?.on('data', (data: Buffer) => {
       if (this.videoConfig.debug) {
@@ -462,23 +466,30 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
     // AMF doesn't need special init - it accepts software frames
     
-    // Modify source to skip audio track if audio is disabled
+    // Build input args in correct FFmpeg order (all must come before -i):
+    // 1. -allowed_media_types (skip audio track if audio disabled)
+    // 2. -stimeout (RTSP connection timeout, prevents indefinite hangs)
+    // 3. -probesize / -analyzeduration (only if user explicitly set them)
+    // 4. -i <url>
+    // We extract the -i URL from source and rebuild the arg string explicitly
+    // to avoid chained regex replacements that can produce wrong ordering.
     let modifiedSource = source;
-    if (!this.videoConfig.audio && source.includes('rtsp://')) {
-      // Insert -allowed_media_types video before -i to skip audio during RTSP connection
-      modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
-    }
-    
-    // Only inject probesize/analyzeduration if user explicitly set them in config.
-    // Do not auto-inject defaults — FFmpeg handles all camera types correctly with its own defaults.
-    // For RTSP sources, add -stimeout to prevent indefinite hangs on connection issues.
-    if (this.videoConfig.probeSize !== undefined || this.videoConfig.analyzeDuration !== undefined) {
-      const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : 5000000;
-      const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : 5000000;
-      modifiedSource = modifiedSource.replace(/-i\s+/, `-probesize ${probeSize} -analyzeduration ${analyzeDuration} -i `);
-    }
     if (source.includes('rtsp://')) {
-      modifiedSource = modifiedSource.replace(/-i\s+/, '-stimeout 5000000 -i ');
+      // Extract everything before -i and the URL after -i
+      const iMatch = source.match(/^(.*?)-i\s+(\S+.*)$/s);
+      if (iMatch) {
+        const preI = iMatch[1];   // e.g. "-rtsp_transport tcp "
+        const urlAndRest = iMatch[2]; // e.g. "rtsp://..."
+        const inputArgs: string[] = [];
+        if (!this.videoConfig.audio) inputArgs.push('-allowed_media_types video');
+        inputArgs.push('-stimeout 5000000');
+        if (this.videoConfig.probeSize !== undefined || this.videoConfig.analyzeDuration !== undefined) {
+          const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : 5000000;
+          const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : 5000000;
+          inputArgs.push(`-probesize ${probeSize} -analyzeduration ${analyzeDuration}`);
+        }
+        modifiedSource = `${preI}${inputArgs.join(' ')} -i ${urlAndRest}`;
+      }
     }
     // Add source (includes -i)
     ffmpegArgs += modifiedSource;
@@ -526,7 +537,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
           } -flags +global_header`
           + ` -f rtp`
           + (useAudioCopy ? '' : ` -ar ${request.audio.sample_rate}k`)
-          + ` -b:a ${request.audio.max_bit_rate}k`
+          + (useAudioCopy ? '' : ` -b:a ${request.audio.max_bit_rate}k`)
           + ` -ac ${request.audio.channel
           } -payload_type ${'pt' in request.audio ? request.audio.pt : 110}`;
 
