@@ -489,27 +489,24 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     
     // Build input args in correct FFmpeg order (all must come before -i):
     // 1. -allowed_media_types (skip audio track if audio disabled)
-    // 2. -stimeout (RTSP connection timeout, prevents indefinite hangs)
-    // 3. -probesize / -analyzeduration (only if user explicitly set them)
-    // 4. -i <url>
-    // We extract the -i URL from source and rebuild the arg string explicitly
-    // to avoid chained regex replacements that can produce wrong ordering.
+    // 2. -probesize / -analyzeduration (only if user explicitly set them)
+    // 3. -i <url>
     let modifiedSource = source;
     if (source.includes('rtsp://')) {
-      // Extract everything before -i and the URL after -i
       const iMatch = source.match(/^(.*?)-i\s+(\S+.*)$/s);
       if (iMatch) {
-        const preI = iMatch[1];   // e.g. "-rtsp_transport tcp "
-        const urlAndRest = iMatch[2]; // e.g. "rtsp://..."
+        const preI = iMatch[1];
+        const urlAndRest = iMatch[2];
         const inputArgs: string[] = [];
         if (!this.videoConfig.audio) inputArgs.push('-allowed_media_types video');
-        inputArgs.push('-stimeout 5000000');
         if (this.videoConfig.probeSize !== undefined || this.videoConfig.analyzeDuration !== undefined) {
           const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : 5000000;
           const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : 5000000;
           inputArgs.push(`-probesize ${probeSize} -analyzeduration ${analyzeDuration}`);
         }
-        modifiedSource = `${preI}${inputArgs.join(' ')} -i ${urlAndRest}`;
+        if (inputArgs.length > 0) {
+          modifiedSource = `${preI}${inputArgs.join(' ')} -i ${urlAndRest}`;
+        }
       }
     }
     // Add source (includes -i)
