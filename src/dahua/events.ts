@@ -36,7 +36,8 @@ export class DahuaEvents {
     this.log.info('🎬 Starting motion event stream...');
     
     // Subscribe to motion-related events
-    const eventCodes = 'VideoMotion,CrossLineDetection,CrossRegionDetection,AlarmLocal,VideoLoss,VideoBlind';
+    // Only subscribe to events we actually handle — VideoLoss/VideoBlind are not motion events
+    const eventCodes = 'VideoMotion,CrossLineDetection,CrossRegionDetection,AlarmLocal';
     const path = `/cgi-bin/eventManager.cgi?action=attach&codes=[${eventCodes}]&heartbeat=5`;
     
     this.log.info(`📡 Connecting to: ${path}`);
@@ -113,23 +114,13 @@ export class DahuaEvents {
       this.parseEvent(eventType, action, channelIndex);
     }
 
-    // Keep only unparsed data in buffer
-    const lastMatch = this.buffer.lastIndexOf('index=');
-    if (lastMatch > -1) {
-      const nextBoundary = this.buffer.indexOf('--', lastMatch);
-      const nextNewline = this.buffer.indexOf('\n', lastMatch);
-      
-      let cutPoint = -1;
-      if (nextBoundary > -1 && nextNewline > -1) {
-        cutPoint = Math.min(nextBoundary, nextNewline);
-      } else if (nextBoundary > -1) {
-        cutPoint = nextBoundary;
-      } else if (nextNewline > -1) {
-        cutPoint = nextNewline;
-      }
-      
-      if (cutPoint > lastMatch) {
-        this.buffer = this.buffer.substring(cutPoint);
+    // Trim buffer: keep only content after the last fully parsed event line
+    // Find the last newline after the last matched event to safely discard processed data
+    const lastEventEnd = this.buffer.search(/Code=[^\r\n]+index=\d+[^\r\n]*/);
+    if (lastEventEnd > -1) {
+      const afterLastEvent = this.buffer.indexOf('\n', lastEventEnd);
+      if (afterLastEvent > -1) {
+        this.buffer = this.buffer.substring(afterLastEvent + 1);
       }
     }
 
