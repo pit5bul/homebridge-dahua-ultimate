@@ -105,3 +105,19 @@ export const MOTION_EVENT_TYPES = [
   'CrossRegionDetection',
   'AlarmLocal',
 ];
+
+/**
+ * Stall watchdog defaults.
+ *
+ * Detects a frozen FFmpeg video pipeline — observed in the wild as a reproducible
+ * FFmpeg+VAAPI+Mesa/radeonsi driver-level hang (confirmed independent of this plugin:
+ * reproduces in a bare `ffmpeg` process with no network output and no HomeKit
+ * involved) — and force-restarts FFmpeg before HomeKit's own stream-start patience
+ * window runs out. HomeKit's live-view player does not reliably self-recover from an
+ * interruption during stream startup, so a fast, silent restart here is the
+ * difference between a viewer never noticing and a permanent black screen.
+ */
+export const DEFAULT_STALL_TIMEOUT_MS = 4000;
+export const MAX_STALL_RESTARTS = 3;
+export const STALL_CHECK_INTERVAL_MS = 1000;
+
