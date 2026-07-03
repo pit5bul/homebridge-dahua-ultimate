@@ -2,6 +2,14 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.8] - 2026-07-04
+
+### Fixed
+- **`nativeSnapshot: false` didn't actually work — it still hit the Dahua `snapshot.cgi` URL, just via FFmpeg instead of direct HTTP.** `platform.ts` auto-generates a `stillImageSource` (the Dahua snapshot.cgi HTTPS URL) for every camera unconditionally, and the FFmpeg fallback added in 2.0.7 checked `stillImageSource || source` — so it always picked up the auto-generated Dahua URL instead of the RTSP `source`, even with `nativeSnapshot: false` set. In practice this meant ONVIF cameras went from a fast, clean HTTP 400/500 failure to an ~8-10 second FFmpeg `Connection timed out` hang on every single snapshot attempt (FFmpeg's HTTPS demuxer can't do digest auth negotiation at all, so it was always going to fail, just slower). Real-world impact: repeated hung FFmpeg processes tied up system resources and were reported as generally delayed playback. Fixed by using the RTSP `source` directly whenever `nativeSnapshot` is explicitly `false`, bypassing the auto-generated Dahua URL entirely. The `stillImageSource || source` priority is preserved only for the legacy case (no `DahuaApi` client at all), where a user may have deliberately configured their own working `stillImageSource`.
+
+### Notes
+- If you set `nativeSnapshot: false` on any camera in 2.0.7, it did not have the intended effect — update to 2.0.8 for the fix to actually take hold. No config changes needed; the same `nativeSnapshot: false` setting now does what it was supposed to.
+
 ## [2.0.7] - 2026-07-04
 
 ### Fixed
