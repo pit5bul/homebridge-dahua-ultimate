@@ -129,6 +129,13 @@ export interface VideoConfig {
   // FFmpeg from the RTSP `source` instead. Defaults to true (use snapshot.cgi).
   nativeSnapshot?: boolean;
 
+  // Stall watchdog: detects a frozen FFmpeg output (e.g. VAAPI/GPU driver hangs — a
+  // known class of bug in FFmpeg+Mesa+radeonsi, reproducible even outside this plugin)
+  // and force-restarts the FFmpeg process before HomeKit's own stream-start patience
+  // runs out. Defaults: enabled, 4000ms stall threshold, max 3 restarts per session.
+  stallWatchdog?: boolean;
+  stallTimeoutMs?: number;
+
   // Stream analysis (probesize/analyzeduration)
   // Explicit overrides always win over the `codec`-based defaults above.
   // H.265 cameras: use probeSize: 32, analyzeDuration: 0 for fastest startup
