@@ -193,8 +193,18 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       return;
     }
 
-    // Fallback: FFmpeg (used only if DahuaApi not available, e.g. custom source override)
-    const source = this.videoConfig.stillImageSource || this.videoConfig.source;
+    // Fallback: FFmpeg-grab a frame from the RTSP stream.
+    // IMPORTANT: platform.ts auto-generates `stillImageSource` for every camera as the
+    // Dahua snapshot.cgi HTTPS URL, regardless of `nativeSnapshot`. When we're here
+    // specifically because `nativeSnapshot: false` was set (ONVIF/non-Dahua channel),
+    // that auto-generated URL is exactly the thing we're trying to avoid — FFmpeg can't
+    // do digest auth over HTTPS anyway, so it just times out. Use the RTSP `source`
+    // directly in that case. Only fall back to `stillImageSource` first when there's no
+    // DahuaApi client at all (legacy/custom setups where the user may have deliberately
+    // configured a working stillImageSource of their own).
+    const source = this.videoConfig.nativeSnapshot === false
+      ? (this.videoConfig.source || this.videoConfig.stillImageSource)
+      : (this.videoConfig.stillImageSource || this.videoConfig.source);
     if (!source) {
       this.log.error('No source configured', this.cameraConfig.name);
       callback(new Error('No source configured'));
