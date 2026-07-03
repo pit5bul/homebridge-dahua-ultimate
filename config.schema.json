@@ -397,6 +397,12 @@
                   ],
                   "description": "The camera's actual RTSP video codec (check the NVR's encode settings for this channel). Setting this lets the plugin pick a fast, reliable probeSize/analyzeDuration automatically. Overridden by explicit values below if set."
                 },
+                "nativeSnapshot": {
+                  "title": "Use Dahua Native Snapshot",
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Leave ON for genuine Dahua-brand channels (fast, direct HTTP). Turn OFF for non-Dahua/ONVIF cameras patched into the NVR — Dahua's snapshot.cgi doesn't work for those and will fail every time. When off, snapshots are grabbed via FFmpeg from the RTSP stream instead (slower, but works for any camera)."
+                },
                 "probeSize": {
                   "title": "Probe Size (bytes)",
                   "type": "integer",
@@ -576,6 +582,7 @@
                 "cameras[].videoConfig.maxStreams",
                 "cameras[].videoConfig.maxFPS",
                 "cameras[].videoConfig.codec",
+                "cameras[].videoConfig.nativeSnapshot",
                 "cameras[].videoConfig.probeSize",
                 "cameras[].videoConfig.analyzeDuration",
                 "cameras[].videoConfig.debug"
