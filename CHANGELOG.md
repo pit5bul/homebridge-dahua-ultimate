@@ -2,6 +2,17 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.7] - 2026-07-04
+
+### Fixed
+- **Snapshot 500/400 errors on non-Dahua/ONVIF channels (100% failure rate, unaffected by 2.0.6)** — 13 hours of real-world logging after 2.0.6 showed two channels failing on *every single* snapshot attempt with zero correlation to concurrency, timing, or that channel's own stream activity. Confirmed root cause: those two channels are third-party ONVIF cameras patched into the NVR, not genuine Dahua hardware. Dahua's `snapshot.cgi` is a proprietary endpoint only implemented for the NVR's own channels — it was never going to succeed for passthrough ONVIF channels no matter how the request was retried, queued, or re-authenticated. This was not fixable via auth/concurrency changes because it was never an auth or concurrency problem.
+
+### Added
+- **`nativeSnapshot` videoConfig option** — set to `false` on non-Dahua/ONVIF channels to use an FFmpeg-from-RTSP snapshot fallback instead of Dahua's `snapshot.cgi` (which the plugin already had built in for cameras without a `DahuaApi` client, just not exposed as a per-camera override). Slower than the direct HTTP path, but works for any camera regardless of brand. Defaults to `true` (unchanged behavior for genuine Dahua channels).
+
+### Notes
+- If a channel is failing 100% of the time regardless of load, that's a strong signal it's not a timing/concurrency bug — check whether it's actually a Dahua-branded channel before assuming a code fix will help. The 2.0.6 request-queue change was still a correct fix for genuine cross-camera contention and the unchecked-retry-status bug; it just wasn't the fix for *this* particular failure, since this one was never a Dahua-channel-behaving-badly problem at all.
+
 ## [2.0.6] - 2026-07-03
 
 ### Fixed
