@@ -2,6 +2,20 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.9] - 2026-07-04
+
+### Added
+- **Stall watchdog** — detects a frozen FFmpeg video pipeline and force-restarts it before HomeKit gives up on the stream. Root cause context: direct testing on the host (bare `ffmpeg -hwaccel vaapi ... -f null -`, no plugin, no network output, no HomeKit involved at all) reproduced multi-second freezes in FFmpeg's own frame counter, confirming this is a known, reproducible FFmpeg+VAAPI+Mesa/radeonsi driver-level hang — not something fixable in plugin code. However, HomeKit's live-view player does not reliably self-recover from an interruption during stream startup, so a rare, brief, otherwise-harmless hang can present as a permanent black screen for that viewing attempt. The watchdog parses `-progress pipe:1` output (previously fully discarded), tracks whether the frame counter is actually advancing, and if it's frozen for longer than `stallTimeoutMs` (default 4000ms), kills and silently restarts FFmpeg using the same session/SRTP parameters already negotiated with HomeKit — no renegotiation, and ideally the viewer never notices. Restarts are capped at 3 per session (`MAX_STALL_RESTARTS`); beyond that the watchdog logs and steps back, letting HomeKit's own timeout take over rather than restart-looping a camera that's persistently broken.
+- New videoConfig options: `stallWatchdog` (boolean, default `true`) and `stallTimeoutMs` (number, default `4000`).
+- All watchdog activity is logged clearly with a `⚠️ STALL WATCHDOG:` prefix — stall detected (with frozen frame number and stall duration), each restart attempt, and the give-up case after max restarts — so this is visible and greppable in Homebridge logs rather than silent.
+
+### Fixed
+- `-progress pipe:1` output was being fully drained and discarded rather than parsed. It's now the data source for the stall watchdog.
+
+### Notes
+- This does not fix the underlying FFmpeg/VAAPI/Mesa driver hang — that lives upstream, outside this plugin, and was confirmed to reproduce in a bare `ffmpeg` process with zero plugin involvement. This makes the plugin resilient to it instead.
+- If you see `STALL WATCHDOG` messages in your logs, that's expected and means the watchdog did its job — the alternative would have been a black screen with no recovery at all. Frequent stalls on a specific camera are still worth investigating at the hardware/driver level (e.g. try `"encoder": "software"` to rule VAAPI in or out for that camera).
+
 ## [2.0.8] - 2026-07-04
 
 ### Fixed
