@@ -136,6 +136,15 @@ export interface VideoConfig {
   stallWatchdog?: boolean;
   stallTimeoutMs?: number;
 
+  // Wall-clock forced keyframe interval, in seconds. HAP-NodeJS's own source documents
+  // "minimum keyframe interval is about 5 seconds" as HomeKit's tolerance. Without an
+  // explicit, wall-clock-based guarantee, a client connecting mid-GOP has to wait for
+  // the next keyframe to start decoding at all — and the previous frame-count-based
+  // -g approach drifts with actual encode fps and freezes entirely during a stall.
+  // Matches the proven production value used by homebridge-unifi-protect
+  // (-force_key_frames expr:gte(t,n_forced*4)). Defaults to 4 (seconds).
+  forceKeyFrameInterval?: number;
+
   // Stream analysis (probesize/analyzeduration)
   // Explicit overrides always win over the `codec`-based defaults above.
   // H.265 cameras: use probeSize: 32, analyzeDuration: 0 for fastest startup
