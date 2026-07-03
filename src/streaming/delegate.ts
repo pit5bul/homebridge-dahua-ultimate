@@ -20,6 +20,7 @@ import {
   HOMEKIT_MAX_WIDTH,
   HOMEKIT_MAX_HEIGHT,
   QUALITY_PRESETS,
+  PROBE_DEFAULTS_BY_CODEC,
 } from '../settings';
 import { pickPort } from 'pick-port';
 
@@ -489,7 +490,14 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     
     // Build input args in correct FFmpeg order (all must come before -i):
     // 1. -allowed_media_types (skip audio track if audio disabled)
-    // 2. -probesize / -analyzeduration (only if user explicitly set them)
+    // 2. -probesize / -analyzeduration
+    //    Priority: explicit user override > codec-based smart default > FFmpeg's own default.
+    //    Regression note: v2.0.1-2.0.4 dropped the codec-based default entirely, so any
+    //    camera without an explicit probeSize/analyzeDuration fell back to FFmpeg's ~5s
+    //    analysis window. For hardware-accelerated H.265 streams this analysis delay was
+    //    long enough that HomeKit gave up waiting and never displayed video, even though
+    //    FFmpeg itself was running fine. Setting `codec` on the camera restores fast,
+    //    reliable startup without needing to hand-tune probeSize/analyzeDuration.
     // 3. -i <url>
     let modifiedSource = source;
     if (source.includes('rtsp://')) {
@@ -499,10 +507,15 @@ export class StreamingDelegate implements CameraStreamingDelegate {
         const urlAndRest = iMatch[2];
         const inputArgs: string[] = [];
         if (!this.videoConfig.audio) inputArgs.push('-allowed_media_types video');
-        if (this.videoConfig.probeSize !== undefined || this.videoConfig.analyzeDuration !== undefined) {
-          const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : 5000000;
-          const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : 5000000;
-          inputArgs.push(`-probesize ${probeSize} -analyzeduration ${analyzeDuration}`);
+
+        const codecDefaults = this.videoConfig.codec ? PROBE_DEFAULTS_BY_CODEC[this.videoConfig.codec] : undefined;
+        const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : codecDefaults?.probeSize;
+        const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : codecDefaults?.analyzeDuration;
+
+        if (probeSize !== undefined || analyzeDuration !== undefined) {
+          const resolvedProbeSize = probeSize !== undefined ? probeSize : 5000000;
+          const resolvedAnalyzeDuration = analyzeDuration !== undefined ? analyzeDuration : 5000000;
+          inputArgs.push(`-probesize ${resolvedProbeSize} -analyzeduration ${resolvedAnalyzeDuration}`);
         }
         if (inputArgs.length > 0) {
           modifiedSource = `${preI}${inputArgs.join(' ')} -i ${urlAndRest}`;
