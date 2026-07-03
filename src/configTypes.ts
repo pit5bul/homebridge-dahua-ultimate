@@ -122,6 +122,13 @@ export interface VideoConfig {
   // Ignored if probeSize/analyzeDuration are explicitly set below.
   codec?: 'h264' | 'h265';
 
+  // Set to false for non-Dahua/ONVIF channels patched into the NVR — Dahua's
+  // snapshot.cgi is a proprietary endpoint that only works for genuine Dahua
+  // channels and fails 100% of the time (HTTP 400/500) for passthrough ONVIF
+  // cameras, regardless of retries. When false, snapshots are grabbed via
+  // FFmpeg from the RTSP `source` instead. Defaults to true (use snapshot.cgi).
+  nativeSnapshot?: boolean;
+
   // Stream analysis (probesize/analyzeduration)
   // Explicit overrides always win over the `codec`-based defaults above.
   // H.265 cameras: use probeSize: 32, analyzeDuration: 0 for fastest startup
