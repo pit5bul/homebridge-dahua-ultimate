@@ -2,6 +2,20 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.11] - 2026-07-04
+
+### Fixed
+- **No wall-clock keyframe guarantee anywhere in the pipeline.** HAP-NodeJS's own source documents `// minimum keyframe interval is about 5 seconds` directly on the `VideoInfo` type HomeKit negotiates for every stream — this is HomeKit's own stated tolerance, not an inferred guess. Previously, keyframe timing depended entirely on a frame-count-based `-g` flag that was only set for hardware encoders with an explicit `qualityProfile`, and was never set at all for the software encoder path — meaning `libx264`'s default 250-frame GOP (≈16.7s at 15fps) applied unconditionally on those cameras, more than 3x past HomeKit's documented tolerance, on every single session. Even where `-g` was set, it approximates a time interval only at nominal fps — real-world encode fps fluctuated constantly (13-16fps was typical throughout testing), and a frame-count GOP timer freezes entirely during a stall (see 2.0.9), which is exactly when a client is likely to be waiting on a keyframe.
+- **`localrtcpport` was never set on the video RTP output**, unlike HAP-NodeJS's own reference camera accessory implementation, which sets this explicitly. Without it, FFmpeg's local RTCP receive port was left to an OS-assigned ephemeral port rather than the port already reserved for this exact purpose (`sessionInfo.videoReturnPort`, allocated in `prepareStream` but never actually used anywhere).
+
+### Added
+- **`-force_key_frames expr:gte(t,n_forced*N)`** applied universally, for every encoder (VAAPI, software, AMF, QuickSync, NVENC) — a wall-clock-based forced keyframe guarantee, independent of actual encode fps or GOP frame-count settings. Matches the exact syntax and interval used in production by homebridge-unifi-protect. New `forceKeyFrameInterval` videoConfig option (seconds, default `4` — a safety margin under HomeKit's ~5s documented tolerance).
+- `localrtcpport=${sessionInfo.videoReturnPort}` added to the video RTP output URL.
+
+### Notes
+- This does not address the VAAPI/Mesa/radeonsi driver-level hang (see 2.0.9's stall watchdog) or the RECONFIGURE-acknowledgment gap (still an unresolved, industry-wide limitation as of FFmpeg 8 — even homebridge-unifi-protect, on the same FFmpeg major version, still doesn't act on RECONFIGURE). Those remain separate, independently-tracked issues.
+- True client-side "is HomeKit actually decoding/displaying this" confirmation is not achievable without a full RTP/RTCP relay proxy sitting between FFmpeg and the client — FFmpeg does not expose received RTCP contents through any interface this plugin can observe. This was investigated and intentionally not implemented in this release; the risk of a hastily-built proxy layer destabilizing an already-fragile pipeline outweighed the diagnostic benefit at this time.
+
 ## [2.0.10] - 2026-07-04
 
 ### Fixed
