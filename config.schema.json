@@ -416,6 +416,14 @@
                   "default": 4000,
                   "description": "How long the frame counter must be frozen before the stall watchdog restarts FFmpeg. Lower catches stalls faster but risks false positives on slow-starting streams."
                 },
+                "forceKeyFrameInterval": {
+                  "title": "Forced Keyframe Interval (seconds)",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "default": 4,
+                  "description": "Maximum wall-clock time between keyframes, regardless of encoding fps. HomeKit's own tolerance is documented at ~5 seconds — a client connecting or reconnecting mid-stream can't decode anything until the next keyframe arrives. Keep this at 4 or lower for a safety margin."
+                },
                 "probeSize": {
                   "title": "Probe Size (bytes)",
                   "type": "integer",
@@ -598,6 +606,7 @@
                 "cameras[].videoConfig.nativeSnapshot",
                 "cameras[].videoConfig.stallWatchdog",
                 "cameras[].videoConfig.stallTimeoutMs",
+                "cameras[].videoConfig.forceKeyFrameInterval",
                 "cameras[].videoConfig.probeSize",
                 "cameras[].videoConfig.analyzeDuration",
                 "cameras[].videoConfig.debug"
