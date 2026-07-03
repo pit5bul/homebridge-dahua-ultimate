@@ -79,8 +79,9 @@ On first startup the plugin will auto-discover all cameras and populate the conf
 | `copyAudio` | boolean | false | Pass audio through without transcoding |
 | `recording` | boolean | false | Enable HKSV recording |
 | `prebuffer` | boolean | false | Enable HKSV prebuffer |
-| `probeSize` | number | auto | Bytes FFmpeg reads to detect stream params. H.265: `32`, H.264: `500000`. Leave unset for auto. |
-| `analyzeDuration` | number | auto | Microseconds FFmpeg analyses the stream. H.265: `0`, H.264: `1000000`. Leave unset for auto. |
+| `codec` | string | — | `h264` or `h265` — set this to your camera's actual RTSP codec for fast, reliable stream startup. See below. |
+| `probeSize` | number | auto | Bytes FFmpeg reads to detect stream params. Overrides the `codec` default if set. H.265: `32`, H.264: `500000`. |
+| `analyzeDuration` | number | auto | Microseconds FFmpeg analyses the stream. Overrides the `codec` default if set. H.265: `0`, H.264: `1000000`. |
 | `debug` | boolean | false | Verbose FFmpeg logging |
 
 ## Frame Rate
@@ -97,21 +98,23 @@ If your NVR streams at a different frame rate, set `maxFPS` accordingly:
 }
 ```
 
-## Stream Analysis (probeSize / analyzeDuration)
+## Stream Analysis (codec / probeSize / analyzeDuration)
 
-By default the plugin uses FFmpeg's own defaults for stream analysis, which work correctly for all camera types. You only need to set these if a specific camera has unusual stream parameters:
+**Set `codec` on every camera.** Without it, FFmpeg falls back to its own default analysis window (several seconds), which is long enough that HomeKit gives up waiting and shows a black screen or endless spinner — even though the stream is actually running fine in the background. This is not a hypothetical: it's the cause of the v2.0.1–2.0.4 "streams start but never display video" regression.
 
-| Camera codec | Recommended probeSize | Recommended analyzeDuration |
+| Camera codec | Set `codec` to | Resulting probeSize / analyzeDuration |
 |---|---|---|
-| H.265 (HEVC) | not needed (FFmpeg detects from SDP) | not needed |
-| H.264 standard | not needed | not needed |
-| H.264 with unusual SPS timing | `500000` | `1000000` |
+| H.265 (HEVC) | `"h265"` | `32` / `0` — fastest, works because HEVC advertises full stream params in the RTSP SDP |
+| H.264 | `"h264"` | `500000` / `1000000` — H.264 needs more data before parameters are reliably detected |
 
-Override per camera in Config UI X under **Advanced / Debug**, or in config.json:
+Check your NVR's channel encode settings if you're not sure which codec a camera uses.
+
+If a specific camera needs different values than the codec default (e.g. unusual SPS timing), set `probeSize`/`analyzeDuration` explicitly — they always override the `codec` default:
 
 ```json
 {
   "videoConfig": {
+    "codec": "h264",
     "probeSize": 500000,
     "analyzeDuration": 1000000
   }
