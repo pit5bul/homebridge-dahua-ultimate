@@ -21,6 +21,9 @@ import {
   HOMEKIT_MAX_HEIGHT,
   QUALITY_PRESETS,
   PROBE_DEFAULTS_BY_CODEC,
+  DEFAULT_STALL_TIMEOUT_MS,
+  MAX_STALL_RESTARTS,
+  STALL_CHECK_INTERVAL_MS,
 } from '../settings';
 import { pickPort } from 'pick-port';
 
@@ -43,6 +46,13 @@ interface ActiveSession {
   sessionInfo: SessionInfo;
   videoProcess?: ChildProcess;
   timeout?: NodeJS.Timeout;
+  // Stall watchdog state
+  args?: string[];
+  watchdogTimer?: NodeJS.Timeout;
+  lastFrame?: number;
+  lastFrameChangeTime?: number;
+  restartCount?: number;
+  restarting?: boolean;
 }
 
 interface ResolutionInfo {
@@ -366,12 +376,57 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
     // Split the command string into array for spawn
     const args = ffmpegArgs.split(/\s+/).filter(arg => arg.length > 0);
-    const ffmpeg = spawn(this.videoProcessor, args, { env: process.env });
-    const activeSession: ActiveSession = { sessionInfo, videoProcess: ffmpeg };
+    const activeSession: ActiveSession = {
+      sessionInfo,
+      args,
+      lastFrame: 0,
+      lastFrameChangeTime: Date.now(),
+      restartCount: 0,
+      restarting: false,
+    };
     this.activeSessions.set(request.sessionID, activeSession);
 
-    // Always drain stdout (FFmpeg -progress pipe:1 output) to prevent pipe buffer blocking
-    ffmpeg.stdout?.on('data', (_data: Buffer) => { /* drain progress output */ });
+    this.spawnFfmpegProcess(request.sessionID, args);
+
+    if (this.videoConfig.stallWatchdog !== false) {
+      this.startStallWatchdog(request.sessionID);
+    }
+
+    callback();
+  }
+
+  /**
+   * Spawns the FFmpeg process for a session and wires up its output handlers.
+   * Used both for the initial stream start and for silent stall-recovery restarts
+   * (see startStallWatchdog) — a restart reuses the same activeSession entry and the
+   * same FFmpeg args (same SRTP ports/keys already negotiated with HomeKit), so
+   * HomeKit never needs to know a restart happened.
+   */
+  private spawnFfmpegProcess(sessionID: string, args: string[]): void {
+    const activeSession = this.activeSessions.get(sessionID);
+    if (!activeSession) return;
+
+    const ffmpeg = spawn(this.videoProcessor, args, { env: process.env });
+    activeSession.videoProcess = ffmpeg;
+
+    // Parse -progress pipe:1 output to track whether frames are actually advancing.
+    // Previously this was fully drained/discarded; now it feeds the stall watchdog.
+    let progressBuffer = '';
+    ffmpeg.stdout?.on('data', (data: Buffer) => {
+      progressBuffer += data.toString();
+      const lines = progressBuffer.split('\n');
+      progressBuffer = lines.pop() || '';
+      for (const line of lines) {
+        const match = line.match(/^frame=(\d+)/);
+        if (match) {
+          const frame = parseInt(match[1], 10);
+          if (frame !== activeSession.lastFrame) {
+            activeSession.lastFrame = frame;
+            activeSession.lastFrameChangeTime = Date.now();
+          }
+        }
+      }
+    });
 
     ffmpeg.stderr?.on('data', (data: Buffer) => {
       if (this.videoConfig.debug) {
@@ -382,10 +437,83 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       }
     });
 
-    ffmpeg.on('error', (err) => { this.log.error(`FFmpeg error: ${err.message}`, this.cameraConfig.name); this.stopStream(request.sessionID); });
-    ffmpeg.on('close', (code) => { if (code !== 0 && code !== null) this.log.warn(`FFmpeg exited with code ${code}`, this.cameraConfig.name); this.stopStream(request.sessionID); });
+    ffmpeg.on('error', (err) => {
+      this.log.error(`FFmpeg error: ${err.message}`, this.cameraConfig.name);
+      // Only tear down the session if this is still the current process for it —
+      // if a stall-watchdog restart already replaced it, this is a late event from
+      // the superseded process and must not kill the replacement.
+      if (activeSession.videoProcess === ffmpeg) this.stopStream(sessionID);
+    });
 
-    callback();
+    ffmpeg.on('close', (code) => {
+      if (activeSession.videoProcess !== ffmpeg) {
+        // This process was already superseded by a stall-watchdog restart (kill()
+        // is async, so this event can arrive well after the replacement is running).
+        // Nothing to do — the replacement owns the session now.
+        return;
+      }
+      if (code !== 0 && code !== null) this.log.warn(`FFmpeg exited with code ${code}`, this.cameraConfig.name);
+      this.stopStream(sessionID);
+    });
+  }
+
+  /**
+   * Watches for a frozen FFmpeg video pipeline and force-restarts it.
+   *
+   * Root cause context (confirmed via direct testing on the host, independent of
+   * this plugin): this is a known, reproducible FFmpeg+VAAPI+Mesa/radeonsi driver
+   * hang — it occurs in a bare `ffmpeg` process with no network output and no
+   * HomeKit involved at all, so it cannot be fixed at the plugin level. What the
+   * plugin CAN do is stop it from becoming a permanent black screen: HomeKit's
+   * live-view player does not reliably self-recover from an interruption during
+   * stream startup, so restarting FFmpeg within a couple of seconds — before
+   * HomeKit's own patience runs out — turns an otherwise-fatal hang into something
+   * the viewer never notices.
+   */
+  private startStallWatchdog(sessionID: string): void {
+    const activeSession = this.activeSessions.get(sessionID);
+    if (!activeSession) return;
+
+    const stallTimeoutMs = this.videoConfig.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
+
+    activeSession.watchdogTimer = setInterval(() => {
+      const session = this.activeSessions.get(sessionID);
+      if (!session || session.restarting) return;
+
+      const stalledMs = Date.now() - (session.lastFrameChangeTime ?? Date.now());
+      if (stalledMs < stallTimeoutMs) return;
+
+      const restartCount = session.restartCount ?? 0;
+      if (restartCount >= MAX_STALL_RESTARTS) {
+        this.log.error(
+          `⚠️ STALL WATCHDOG: frame counter still frozen at ${session.lastFrame} after ${MAX_STALL_RESTARTS} restart attempts — giving up, letting HomeKit time out`,
+          this.cameraConfig.name,
+        );
+        if (session.watchdogTimer) clearInterval(session.watchdogTimer);
+        return;
+      }
+
+      this.log.warn(
+        `⚠️ STALL WATCHDOG: frame counter frozen at ${session.lastFrame} for ${stalledMs}ms — ` +
+        `restarting FFmpeg (attempt ${restartCount + 1}/${MAX_STALL_RESTARTS})`,
+        this.cameraConfig.name,
+      );
+
+      session.restarting = true;
+      session.videoProcess?.kill('SIGKILL');
+      session.restartCount = restartCount + 1;
+      session.lastFrame = 0;
+      session.lastFrameChangeTime = Date.now();
+
+      if (session.args) {
+        this.spawnFfmpegProcess(sessionID, session.args);
+        session.restarting = false;
+        this.log.info(
+          `⚠️ STALL WATCHDOG: FFmpeg restarted (attempt ${session.restartCount}/${MAX_STALL_RESTARTS})`,
+          this.cameraConfig.name,
+        );
+      }
+    }, STALL_CHECK_INTERVAL_MS);
   }
 
   private buildFfmpegArgs(source: string, sessionInfo: SessionInfo, resolution: ResolutionInfo, bitrate: number, request: StreamingRequest): string {
@@ -623,6 +751,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     this.log.info('Stopping stream', this.cameraConfig.name);
     if (session.videoProcess) session.videoProcess.kill('SIGKILL');
     if (session.timeout) clearTimeout(session.timeout);
+    if (session.watchdogTimer) clearInterval(session.watchdogTimer);
     this.activeSessions.delete(sessionID);
   }
 
