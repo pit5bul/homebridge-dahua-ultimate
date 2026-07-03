@@ -262,9 +262,14 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
   async prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): Promise<void> {
     const ipv6 = request.addressVersion === 'ipv6';
-    const videoPort = await pickPort({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
+    // videoReturnPort is the ONE port used for both: (1) what we tell HomeKit is our
+    // accessory's RTCP-receiving port in the response below, and (2) what FFmpeg is
+    // told to actually bind its local RTCP socket to (see buildFfmpegArgs). Previously
+    // these were two separate, unrelated ports — HomeKit was told about a port nothing
+    // ever listened on, while FFmpeg listened on a different port HomeKit never knew
+    // about. Matches homebridge-unifi-protect's reference implementation, which uses
+    // the same variable for both purposes rather than allocating a second, unused port.
     const videoReturnPort = await pickPort({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
-    const audioPort = await pickPort({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
     const audioReturnPort = await pickPort({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
 
     const sessionInfo: SessionInfo = {
@@ -285,8 +290,8 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     this.pendingSessions.set(request.sessionID, sessionInfo);
 
     const response = {
-      video: { port: videoPort, ssrc: sessionInfo.videoSSRC, srtp_key: request.video.srtp_key, srtp_salt: request.video.srtp_salt },
-      audio: { port: audioPort, ssrc: sessionInfo.audioSSRC, srtp_key: request.audio.srtp_key, srtp_salt: request.audio.srtp_salt },
+      video: { port: videoReturnPort, ssrc: sessionInfo.videoSSRC, srtp_key: request.video.srtp_key, srtp_salt: request.video.srtp_salt },
+      audio: { port: audioReturnPort, ssrc: sessionInfo.audioSSRC, srtp_key: request.audio.srtp_key, srtp_salt: request.audio.srtp_salt },
     };
 
     this.log.debug(`Stream prepared: ${request.targetAddress}:${request.video.port}`, this.cameraConfig.name);
@@ -764,7 +769,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
           + ` -srtp_out_suite AES_CM_128_HMAC_SHA1_80`
           + ` -srtp_out_params ${sessionInfo.audioSRTP.toString('base64')
           } srtp://${sessionInfo.address}:${sessionInfo.audioPort
-          }?rtcpport=${sessionInfo.audioPort}&pkt_size=188`;
+          }?rtcpport=${sessionInfo.audioPort}&localrtcpport=${sessionInfo.audioReturnPort}&pkt_size=188`;
       } else {
         this.log.error(`Unsupported audio codec requested: ${request.audio.codec}`, this.cameraConfig.name);
       }
