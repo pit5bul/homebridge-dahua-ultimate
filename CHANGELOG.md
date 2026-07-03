@@ -2,6 +2,19 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.10] - 2026-07-04
+
+### Fixed
+- **No video ever displayed in HomeKit despite a completely healthy FFmpeg pipeline** — the 2.0.9 stall watchdog gave us, for the first time, hard confirmation that FFmpeg was producing frames continuously for 55+ seconds with zero interruption on multiple cameras, yet no video displayed in HomeKit at all. This ruled out FFmpeg/VAAPI stalling as the (sole) explanation and pointed at something in what's actually being sent. Root cause: this plugin never set `-profile:v`/`-level:v` on the encoder to match what HomeKit actually negotiates per-session (`request.video.profile`/`request.video.level`) — every encoder path (VAAPI, software, AMF, QuickSync, NVENC) just used its own default (VAAPI defaults to High profile regardless of what was asked for). Every reference implementation checked (HAP-NodeJS's own example accessory, go2rtc) explicitly maps HomeKit's negotiated profile/level onto the encoder; this plugin was the outlier in not doing so. If a viewing session negotiated a profile/level the encoder wasn't honoring, the client could fail to decode a bitstream it never agreed to, while FFmpeg itself reports success throughout, since it has no way to know the receiving client rejected it.
+
+### Added
+- FFmpeg now receives explicit `-profile:v` / `-level:v` flags derived from HomeKit's actual per-session negotiation (`baseline`/`main`/`high` and `3.1`/`3.2`/`4.0`), for every encoder path.
+- The negotiated profile/level is now logged on every stream start (`HomeKit negotiated: profile=... level=...`), so this can be directly verified against real sessions going forward instead of inferred.
+
+### Notes
+- This does not replace the 2.0.9 stall watchdog — that fix addresses a separate, confirmed-real FFmpeg+VAAPI+Mesa/radeonsi driver hang (reproducible independent of this plugin). This fix addresses a different failure mode: a stream that runs perfectly from FFmpeg's perspective but was never decodable by the specific client that requested it.
+- Channel 7 (Outside Fridge, this deployment)'s repeated total stall-and-give-up pattern is a separate, pre-existing issue (RTSP setup never completing — consistent with an already-documented SPS/H.264 parameter issue on that specific channel) and is not addressed by this change.
+
 ## [2.0.9] - 2026-07-04
 
 ### Added
