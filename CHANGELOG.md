@@ -2,6 +2,25 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.5] - 2026-07-03
+
+### Fixed
+- **Black screen / spinning stream on H.265 cameras (regression since 2.0.1)** — v2.0.1 removed the automatic `probesize`/`analyzeduration` injection, assuming "FFmpeg's own defaults handle all camera types correctly." They don't: without an explicit override, RTSP streams fell back to FFmpeg's ~5 second default analysis window. FFmpeg itself started and connected fine (misleadingly, so logs looked healthy), but HomeKit gave up waiting for video before analysis completed, leaving a permanent black screen/spinner. Restored fast, reliable stream startup via a new `codec` setting (see Added below).
+- **Intermittent snapshot `500 Internal Server Error` on multiple channels** — root cause was a single shared `DahuaApi` instance (and its mutable digest-auth nonce state) used for every camera's snapshot request. Since HomeKit fetches multiple camera thumbnails concurrently, two in-flight snapshot requests could reset/overwrite each other's nonce mid-request, causing the NVR to reject one of them. Each camera now gets its own dedicated `DahuaApi` instance for snapshots, so concurrent requests no longer interfere with each other. Discovery and the motion event stream continue to share a single client since those aren't concurrent.
+- **Dead `VideoLoss`/`VideoBlind` entries removed from `MOTION_EVENT_TYPES`** — these were listed in the constant but never actually part of the event subscription (`events.ts` has hardcoded its own list since 2.0.2); the constant was misleading dead code.
+
+### Added
+- **`codec` videoConfig option (`'h264' | 'h265'`)** — set this to your camera's actual RTSP video codec to get fast, reliable stream startup automatically (H.265 → `probeSize: 32, analyzeDuration: 0`; H.264 → `probeSize: 500000, analyzeDuration: 1000000`). Explicit `probeSize`/`analyzeDuration` values always take priority over the `codec` default if both are set. Cameras with no `codec` and no explicit override behave as in 2.0.1-2.0.4 (FFmpeg's own defaults — safe but slow to start).
+
+### Notes
+- If you were relying on manually-set `probeSize`/`analyzeDuration` per camera, nothing changes — explicit values still win. Setting `codec` instead is recommended so future firmware/channel changes don't require re-tuning magic numbers by hand.
+
+## [2.0.4] - 2026-07-02
+
+### Fixed
+- **Removed invalid `-stimeout` option** — introduced in 2.0.1 to prevent FFmpeg hanging on connection issues; it turned out to be an invalid option in this FFmpeg build and broke all streaming. Removed entirely.
+- **`digestAuth` reset before each snapshot** — forces a fresh 401 challenge/response per snapshot request to avoid stale-nonce errors. (Note: this did not fully resolve intermittent 500s — see 2.0.5, which addresses the underlying shared-instance race.)
+
 ## [2.0.3] - 2026-07-03
 
 ### Fixed
