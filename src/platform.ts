@@ -404,7 +404,22 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
 
     }
 
-    const cameraAccessory = new CameraAccessory(this.api, accessory, camera, this.ffmpegPath, this.log, this.api_client);
+    // Each camera gets its own DahuaApi instance for snapshots, rather than sharing
+    // this.api_client. Digest auth state (nonce/nc) is mutable and per-instance; sharing
+    // one client across cameras meant concurrent snapshot requests (HomeKit fetches
+    // several cameras' thumbnails in parallel) could interleave and corrupt each other's
+    // nonce, producing intermittent 400/500 responses from the NVR. The shared client
+    // is still used for discovery and the motion event stream, which are not concurrent.
+    const cameraApiClient = new DahuaApi(
+      this.platformConfig.host,
+      this.platformConfig.port || DEFAULT_PLATFORM_CONFIG.port,
+      this.platformConfig.secure || DEFAULT_PLATFORM_CONFIG.secure,
+      this.platformConfig.username,
+      this.platformConfig.password,
+      this.log,
+    );
+
+    const cameraAccessory = new CameraAccessory(this.api, accessory, camera, this.ffmpegPath, this.log, cameraApiClient);
     this.cameraAccessories.set(camera.channelId, cameraAccessory);
 
     if (isNew) {
