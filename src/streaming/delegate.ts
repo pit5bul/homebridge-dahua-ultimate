@@ -171,8 +171,14 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
 
     // Use direct HTTP digest auth if DahuaApi is available — no FFmpeg needed.
-    // This is the correct approach: Dahua NVR returns JPEG directly from snapshot.cgi.
-    if (this.dahuaApi) {
+    // This is the correct approach for genuine Dahua-brand channels: the NVR's
+    // snapshot.cgi returns JPEG directly. It does NOT work for non-Dahua/ONVIF
+    // cameras patched into the NVR — Dahua's proprietary CGI endpoints are only
+    // implemented for the NVR's own channels, not passthrough ONVIF channels, and
+    // return HTTP errors (400/500) 100% of the time for those, no matter how the
+    // request is retried, queued, or re-authenticated. Set `nativeSnapshot: false`
+    // on those cameras to use the FFmpeg-from-RTSP fallback below instead.
+    if (this.dahuaApi && this.videoConfig.nativeSnapshot !== false) {
       try {
         this.log.info(`Snapshot fetch: channel=${this.cameraConfig.channelId}`, this.cameraConfig.name);
         const jpeg = await this.dahuaApi.getSnapshot(this.cameraConfig.channelId);
