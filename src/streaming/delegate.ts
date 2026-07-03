@@ -24,6 +24,7 @@ import {
   DEFAULT_STALL_TIMEOUT_MS,
   MAX_STALL_RESTARTS,
   STALL_CHECK_INTERVAL_MS,
+  DEFAULT_FORCE_KEYFRAME_INTERVAL_SECONDS,
 } from '../settings';
 import { pickPort } from 'pick-port';
 
@@ -699,6 +700,18 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     }
     const profileLevelParams = `${profileName ? ` -profile:v ${profileName}` : ''}${levelName ? ` -level:v ${levelName}` : ''}`;
 
+    // Wall-clock forced keyframe interval. HAP-NodeJS's own source documents "minimum
+    // keyframe interval is about 5 seconds" as HomeKit's tolerance — a client connecting
+    // (or reconnecting) mid-GOP has to wait for the next keyframe before it can decode
+    // anything at all. The previous approach (frame-count `-g`, see gopParams above) only
+    // approximates a time interval at nominal fps, drifts when actual fps varies (observed
+    // constantly fluctuating 13-16fps throughout testing), and freezes entirely during a
+    // stall — exactly when a client is most likely to be waiting on a keyframe. This is
+    // applied universally, for every encoder, matching the proven production value used by
+    // homebridge-unifi-protect (`-force_key_frames expr:gte(t,n_forced*4)`).
+    const keyframeInterval = this.videoConfig.forceKeyFrameInterval ?? DEFAULT_FORCE_KEYFRAME_INTERVAL_SECONDS;
+    const forceKeyFramesParam = ` -force_key_frames expr:gte(t,n_forced*${keyframeInterval})`;
+
     ffmpegArgs += `${' -an -sn -dn'
       } -codec:v ${vcodec
       }${profileLevelParams
@@ -708,16 +721,21 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       }${encoderOptions ? ` ${encoderOptions}` : ''
       }${bframeParams
       }${gopParams
+      }${forceKeyFramesParam
       }${bitrate > 0 ? ` -b:v ${bitrate}k` : ''
       } -payload_type ${'pt' in request.video ? request.video.pt : 99}`;
 
     // Video Stream
+    // localrtcpport pins FFmpeg's own local RTCP receive port to the one already
+    // reserved for this session (sessionInfo.videoReturnPort) instead of leaving it to
+    // pick an ephemeral port we have no visibility into. Matches HAP-NodeJS's own
+    // reference camera accessory implementation, which sets this explicitly.
     ffmpegArgs += ` -ssrc ${sessionInfo.videoSSRC
       } -f rtp`
       + ` -srtp_out_suite AES_CM_128_HMAC_SHA1_80`
       + ` -srtp_out_params ${sessionInfo.videoSRTP.toString('base64')
       } srtp://${sessionInfo.address}:${sessionInfo.videoPort
-      }?rtcpport=${sessionInfo.videoPort}&pkt_size=${mtu}`;
+      }?rtcpport=${sessionInfo.videoPort}&localrtcpport=${sessionInfo.videoReturnPort}&pkt_size=${mtu}`;
 
     // Audio (if enabled)
     if (this.videoConfig.audio && 'audio' in request) {
