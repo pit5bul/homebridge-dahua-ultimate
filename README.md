@@ -80,6 +80,7 @@ On first startup the plugin will auto-discover all cameras and populate the conf
 | `recording` | boolean | false | Enable HKSV recording |
 | `prebuffer` | boolean | false | Enable HKSV prebuffer |
 | `codec` | string | — | `h264` or `h265` — set this to your camera's actual RTSP codec for fast, reliable stream startup. See below. |
+| `nativeSnapshot` | boolean | `true` | Set to `false` for non-Dahua/ONVIF channels — see "Non-Dahua / ONVIF Channels" below. |
 | `probeSize` | number | auto | Bytes FFmpeg reads to detect stream params. Overrides the `codec` default if set. H.265: `32`, H.264: `500000`. |
 | `analyzeDuration` | number | auto | Microseconds FFmpeg analyses the stream. Overrides the `codec` default if set. H.265: `0`, H.264: `1000000`. |
 | `debug` | boolean | false | Verbose FFmpeg logging |
@@ -120,6 +121,25 @@ If a specific camera needs different values than the codec default (e.g. unusual
   }
 }
 ```
+
+## Non-Dahua / ONVIF Channels
+
+If your NVR has third-party (ONVIF) cameras patched into some channels alongside genuine Dahua cameras, snapshots will fail 100% of the time on those channels with `HTTP 400`/`500` errors, no matter what — Dahua's `snapshot.cgi` is a proprietary endpoint only implemented for the NVR's own camera channels, not passthrough ONVIF ones. This is a hard NVR limitation, not something retries or auth changes can work around.
+
+Set `nativeSnapshot: false` on those specific cameras to fetch snapshots via FFmpeg from the RTSP stream instead:
+
+```json
+{
+  "videoConfig": {
+    "nativeSnapshot": false,
+    "source": "-rtsp_transport tcp -i rtsp://user:pass@host:554/cam/realmonitor?channel=6&subtype=0"
+  }
+}
+```
+
+This is slower than the direct HTTP path (spawns FFmpeg per snapshot rather than a lightweight HTTP request) but works regardless of camera brand. Leave `nativeSnapshot` unset (or `true`) for genuine Dahua channels — the direct HTTP path is faster and doesn't need this.
+
+If you're not sure whether a channel is a genuine Dahua camera, check the NVR's web UI under Camera/Channel registration — third-party channels are usually labeled ONVIF or show a different manufacturer.
 
 ## Quality Presets
 
