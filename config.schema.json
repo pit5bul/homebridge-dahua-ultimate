@@ -403,6 +403,19 @@
                   "default": true,
                   "description": "Leave ON for genuine Dahua-brand channels (fast, direct HTTP). Turn OFF for non-Dahua/ONVIF cameras patched into the NVR — Dahua's snapshot.cgi doesn't work for those and will fail every time. When off, snapshots are grabbed via FFmpeg from the RTSP stream instead (slower, but works for any camera)."
                 },
+                "stallWatchdog": {
+                  "title": "Stall Watchdog",
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Detects a frozen FFmpeg video pipeline (e.g. a VAAPI/GPU driver hang) and silently restarts FFmpeg before HomeKit gives up on the stream. Recommended to leave on; disable only for debugging."
+                },
+                "stallTimeoutMs": {
+                  "title": "Stall Timeout (ms)",
+                  "type": "integer",
+                  "minimum": 1000,
+                  "default": 4000,
+                  "description": "How long the frame counter must be frozen before the stall watchdog restarts FFmpeg. Lower catches stalls faster but risks false positives on slow-starting streams."
+                },
                 "probeSize": {
                   "title": "Probe Size (bytes)",
                   "type": "integer",
@@ -583,6 +596,8 @@
                 "cameras[].videoConfig.maxFPS",
                 "cameras[].videoConfig.codec",
                 "cameras[].videoConfig.nativeSnapshot",
+                "cameras[].videoConfig.stallWatchdog",
+                "cameras[].videoConfig.stallTimeoutMs",
                 "cameras[].videoConfig.probeSize",
                 "cameras[].videoConfig.analyzeDuration",
                 "cameras[].videoConfig.debug"
