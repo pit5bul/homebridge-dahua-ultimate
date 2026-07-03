@@ -2,6 +2,16 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.12] - 2026-07-04
+
+### Fixed
+- **The RTCP return port advertised to HomeKit never matched the port FFmpeg actually listened on — a structural bug present since this plugin's inception, affecting every camera and every deployment.** `prepareStream` allocated two separate, unrelated UDP ports: one (`videoPort`, a throwaway local variable) was sent back to HomeKit as "this is my accessory's RTCP-receiving port" in the `PrepareStreamResponse`; a second, entirely different port (`videoReturnPort`) was the one actually wired into FFmpeg's `localrtcpport` (added in 2.0.11). HomeKit was told about a port nothing ever listened on; FFmpeg listened on a port HomeKit never knew existed. This bug predates the 2.0.11 `localrtcpport` fix too — before that, FFmpeg used an OS-assigned ephemeral port, which was *also* not the port advertised to HomeKit, just via a different mechanism. The same class of bug existed independently on the audio side (`audioPort` vs the never-fully-wired `audioReturnPort`).
+- Found by directly comparing this plugin's `prepareStream` against homebridge-unifi-protect's real, production `protect-stream.ts` implementation, which uses a single `videoReturnPort` variable for both purposes rather than allocating a second, unused port. This is a real, generalizable correctness bug — not specific to any one NVR, network configuration, or encoder — and plausibly explains "FFmpeg reports healthy sending, HomeKit never displays anything" independent of every other fix shipped so far (probesize, profile/level, keyframe interval, stall recovery), since none of those matter if the RTCP feedback path HomeKit was told to use was never listened to in the first place.
+
+### Notes
+- `response.video.port` and `response.audio.port` now both correctly reference the exact same `videoReturnPort`/`audioReturnPort` values passed to FFmpeg as `localrtcpport`, matching the reference pattern.
+- This does not touch the VAAPI/driver stall issue (2.0.9) or the RECONFIGURE-acknowledgment gap, which remain separate, already-documented issues.
+
 ## [2.0.11] - 2026-07-04
 
 ### Fixed
