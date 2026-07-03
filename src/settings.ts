@@ -121,3 +121,11 @@ export const DEFAULT_STALL_TIMEOUT_MS = 4000;
 export const MAX_STALL_RESTARTS = 3;
 export const STALL_CHECK_INTERVAL_MS = 1000;
 
+/**
+ * Wall-clock forced keyframe interval, in seconds. HAP-NodeJS's own source documents
+ * "minimum keyframe interval is about 5 seconds" as HomeKit's tolerance. 4 seconds
+ * matches the proven production value used by homebridge-unifi-protect, keeping a
+ * safety margin under the ~5s limit.
+ */
+export const DEFAULT_FORCE_KEYFRAME_INTERVAL_SECONDS = 4;
+
