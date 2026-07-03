@@ -387,17 +387,27 @@
                   "placeholder": "Leave empty for automatic",
                   "description": "Custom FFmpeg video filter. Leave empty — the plugin automatically applies the correct filter based on your encoder."
                 },
+                "codec": {
+                  "title": "Source Video Codec",
+                  "type": "string",
+                  "oneOf": [
+                    { "title": "Auto (FFmpeg default — slower, most compatible)", "enum": [""] },
+                    { "title": "H.265 / HEVC", "enum": ["h265"] },
+                    { "title": "H.264", "enum": ["h264"] }
+                  ],
+                  "description": "The camera's actual RTSP video codec (check the NVR's encode settings for this channel). Setting this lets the plugin pick a fast, reliable probeSize/analyzeDuration automatically. Overridden by explicit values below if set."
+                },
                 "probeSize": {
                   "title": "Probe Size (bytes)",
                   "type": "integer",
                   "minimum": 32,
-                  "description": "Bytes FFmpeg reads to detect stream parameters. H.265 cameras: use 32 (fastest). H.264 cameras: use 500000 (recommended) or leave unset for auto-detection. Default is auto based on detected codec."
+                  "description": "Bytes FFmpeg reads to detect stream parameters. H.265 cameras: use 32 (fastest). H.264 cameras: use 500000 (recommended) or leave unset for auto-detection. Overrides the Source Video Codec default above."
                 },
                 "analyzeDuration": {
                   "title": "Analyze Duration (microseconds)",
                   "type": "integer",
                   "minimum": 0,
-                  "description": "Microseconds FFmpeg spends analysing the stream. H.265 cameras: use 0. H.264 cameras: use 1000000. Default is auto based on detected codec."
+                  "description": "Microseconds FFmpeg spends analysing the stream. H.265 cameras: use 0. H.264 cameras: use 1000000. Overrides the Source Video Codec default above."
                 },
                 "debug": {
                   "title": "Debug FFmpeg Output",
@@ -565,6 +575,7 @@
                 "cameras[].videoConfig.packetSize",
                 "cameras[].videoConfig.maxStreams",
                 "cameras[].videoConfig.maxFPS",
+                "cameras[].videoConfig.codec",
                 "cameras[].videoConfig.probeSize",
                 "cameras[].videoConfig.analyzeDuration",
                 "cameras[].videoConfig.debug"
