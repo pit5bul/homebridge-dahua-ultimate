@@ -32,6 +32,23 @@ export const QUALITY_PRESETS = {
 export const DEFAULT_QUALITY_PRESET = '1080p-standard';
 
 /**
+ * Stream analysis (probesize/analyzeduration) defaults by source codec.
+ *
+ * H.265/HEVC cameras advertise full stream parameters in the RTSP SDP, so FFmpeg
+ * can start with almost no analysis — this is what makes startup fast (<2s).
+ * H.264 cameras need more data before FFmpeg reliably detects parameters; too small
+ * a probe window causes "Output file does not contain any stream" crashes.
+ *
+ * These are only applied when the camera's `videoConfig.codec` is set AND the user
+ * hasn't already provided explicit `probeSize`/`analyzeDuration` overrides. Cameras
+ * with no `codec` set fall back to FFmpeg's own defaults (safe but slower to start).
+ */
+export const PROBE_DEFAULTS_BY_CODEC = {
+  h265: { probeSize: 32, analyzeDuration: 0 },
+  h264: { probeSize: 500000, analyzeDuration: 1000000 },
+} as const;
+
+/**
  * Default values for video configuration
  */
 export const DEFAULT_VIDEO_CONFIG = {
@@ -87,6 +104,4 @@ export const MOTION_EVENT_TYPES = [
   'CrossLineDetection',
   'CrossRegionDetection',
   'AlarmLocal',
-  'VideoLoss',
-  'VideoBlind',
 ];
