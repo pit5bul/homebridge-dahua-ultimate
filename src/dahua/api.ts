@@ -153,9 +153,37 @@ export class DahuaApi {
   }
 
   /**
-   * Make a raw HTTP request with digest auth, returning the response stream
+   * Per-NVR request queue. The Dahua NVR's embedded HTTP server appears unable to
+   * reliably service concurrent CGI requests — evidence: specific channels (not a
+   * random set) consistently return slow 500s only when multiple snapshot/API calls
+   * are in flight at once, regardless of which DahuaApi instance issues them. Giving
+   * each camera its own instance (v2.0.5) fixed cross-camera digest-nonce corruption,
+   * but did not fix this, because it's a server-side concurrency limit, not a client
+   * auth-state bug. Requests to the same host:port are now serialized.
+   */
+  private static requestQueues: Map<string, Promise<unknown>> = new Map();
+
+  /**
+   * Make a raw HTTP request with digest auth, returning the response stream.
+   * Serialized per-NVR (see requestQueues above) to avoid overloading the NVR's
+   * embedded HTTP server with concurrent CGI requests.
    */
   private async requestRaw(
+    method: string,
+    path: string,
+    keepAlive: boolean,
+  ): Promise<{ request: http.ClientRequest; response: IncomingMessage }> {
+    const queueKey = `${this.host}:${this.port}`;
+    const previous = DahuaApi.requestQueues.get(queueKey) || Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.requestRawSerialized(method, path, keepAlive));
+    // Store a version that never rejects, so one failed request doesn't jam the queue.
+    DahuaApi.requestQueues.set(queueKey, run.catch(() => undefined));
+    return run;
+  }
+
+  private async requestRawSerialized(
     method: string,
     path: string,
     keepAlive: boolean,
@@ -178,7 +206,15 @@ export class DahuaApi {
       const authHeader = this.computeDigestHeader(method, path);
 
       // Second request with auth header
-      return this.makeRequest(method, path, authHeader, keepAlive);
+      const authedResponse = await this.makeRequest(method, path, authHeader, keepAlive);
+      if (authedResponse.response.statusCode !== 200) {
+        // Previously this status was never checked, so a 400/500 body (sometimes just
+        // a few bytes of error text) was silently handed back as if it were valid
+        // content — e.g. a 21-byte "snapshot" that was actually an error page.
+        authedResponse.response.resume();
+        throw new Error(`HTTP ${authedResponse.response.statusCode}: ${authedResponse.response.statusMessage}`);
+      }
+      return authedResponse;
     }
 
     if (firstResponse.response.statusCode !== 200) {
