@@ -2,6 +2,16 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.0.6] - 2026-07-03
+
+### Fixed
+- **Persistent snapshot `500`/garbage-response errors on specific channels, unaffected by the 2.0.5 per-camera `DahuaApi` fix** — real-world testing after 2.0.5 showed the *same* channels (not a random set) kept failing regardless of which `DahuaApi` instance issued the request, which ruled out a cross-camera nonce race as the (sole) cause. Root cause: the Dahua NVR's embedded HTTP server can't reliably service concurrent CGI requests — evidenced by the failing requests taking 15+ seconds before returning 500, consistent with server-side queuing/timeout rather than a fast auth rejection. Requests to the same NVR (`host:port`) are now serialized through a request queue shared across every `DahuaApi` instance (discovery, event stream, and all per-camera snapshot clients), so the NVR only ever sees one CGI request in flight at a time. This does not affect RTSP video streaming, which is a separate connection path.
+- **Digest-auth retry response status was never checked** — after sending the authenticated retry following a 401 challenge, the client returned whatever came back without checking its status code. A `400`/`500` error response (sometimes just a few bytes of error text) was silently handed back as if it were valid content — visible in the wild as a "successful" 21-byte snapshot that was actually an error page, not a JPEG. The retry's response status is now validated the same way the initial response's is.
+
+### Notes
+- This reverses the assumption behind the v1.1.7 change note ("removing snapshot queue — concurrent snapshots are correct HomeKit behaviour"). That's true from HomeKit's side, but this specific NVR's HTTP server can't back it up — the queue is now on our side instead, transparent to HomeKit, and only serializes requests to the NVR itself.
+- If you still see slow snapshot responses after this update, that's expected under heavy load (many cameras' thumbnails refreshing near-simultaneously) — they should now succeed rather than fail, just queued.
+
 ## [2.0.5] - 2026-07-03
 
 ### Fixed
