@@ -117,7 +117,13 @@ export interface VideoConfig {
   // Advanced
   packetSize?: number;
 
+  // Source codec — enables automatic probesize/analyzeduration selection.
+  // Set this to match the camera's actual RTSP video codec (see NVR's Encode config).
+  // Ignored if probeSize/analyzeDuration are explicitly set below.
+  codec?: 'h264' | 'h265';
+
   // Stream analysis (probesize/analyzeduration)
+  // Explicit overrides always win over the `codec`-based defaults above.
   // H.265 cameras: use probeSize: 32, analyzeDuration: 0 for fastest startup
   // H.264 cameras: use probeSize: 500000, analyzeDuration: 1000000 (or leave unset for auto)
   probeSize?: number;
