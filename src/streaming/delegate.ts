@@ -676,8 +676,32 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     const gopParams = gopSize > 0 ? ` -g ${gopSize}` : ''; // Only add if quality profile set
     const bframeParams = bframes >= 0 ? ` -bf ${bframes}` : ''; // Only add if quality profile set (-1 = skip)
     
+    // Map HomeKit's negotiated H264 profile/level onto explicit FFmpeg flags.
+    // Without this, the encoder picks its own default (VAAPI defaults to High
+    // profile regardless of what HomeKit actually asked for) — if the viewing
+    // client negotiated a lower profile/level for this specific session (varies by
+    // device, tvOS/iOS version, and network conditions), it may fail to decode a
+    // bitstream it never agreed to, even though FFmpeg itself reports success the
+    // whole time. This is standard practice in every reference implementation
+    // checked (HAP-NodeJS's own example accessory, go2rtc) and was previously
+    // missing here for every encoder path.
+    const h264ProfileNames = ['baseline', 'main', 'high'];
+    const h264LevelNames = ['3.1', '3.2', '4.0'];
+    const profileIndex = 'profile' in request.video ? request.video.profile : undefined;
+    const levelIndex = 'level' in request.video ? request.video.level : undefined;
+    const profileName = profileIndex !== undefined ? h264ProfileNames[profileIndex] : undefined;
+    const levelName = levelIndex !== undefined ? h264LevelNames[levelIndex] : undefined;
+    if (profileName || levelName) {
+      this.log.info(
+        `HomeKit negotiated: profile=${profileName ?? 'unknown'} level=${levelName ?? 'unknown'}`,
+        this.cameraConfig.name,
+      );
+    }
+    const profileLevelParams = `${profileName ? ` -profile:v ${profileName}` : ''}${levelName ? ` -level:v ${levelName}` : ''}`;
+
     ffmpegArgs += `${' -an -sn -dn'
       } -codec:v ${vcodec
+      }${profileLevelParams
       }${pixFmt
       }${colorRange
       }${resolution.videoFilter ? ` -filter:v ${resolution.videoFilter}` : ''
