@@ -15,7 +15,7 @@ class CameraAccessory {
     recordingDelegate;
     motionDetected = false;
     motionTimeout;
-    constructor(api, accessory, cameraConfig, videoProcessor, log) {
+    constructor(api, accessory, cameraConfig, videoProcessor, log, dahuaApi) {
         this.accessory = accessory;
         this.cameraConfig = cameraConfig;
         this.log = log;
@@ -31,11 +31,34 @@ class CameraAccessory {
                 accessoryInfo.setCharacteristic(this.hap.Characteristic.FirmwareRevision, cameraConfig.firmwareRevision);
             }
         }
-        this.streamingDelegate = new delegate_1.StreamingDelegate(this.hap, cameraConfig, videoProcessor, log);
+        this.streamingDelegate = new delegate_1.StreamingDelegate(this.hap, cameraConfig, videoProcessor, log, dahuaApi);
         // Create recording delegate if HKSV is enabled
         if (cameraConfig.videoConfig?.recording) {
             this.log.info(`[HKSV] Recording enabled for ${cameraConfig.name}`);
-            this.recordingDelegate = new recordingDelegate_1.RecordingDelegate(this.log, cameraConfig.name || 'Camera', cameraConfig.videoConfig, this.api, this.hap, videoProcessor);
+            this.recordingDelegate = new recordingDelegate_1.RecordingDelegate(this.log, cameraConfig.name || 'Camera', cameraConfig.videoConfig, this.api, videoProcessor);
+        }
+        const maxFPS = cameraConfig.videoConfig?.maxFPS || 15;
+        // Principle: declare only what's real. homebridge-unifi-protect computes its
+        // supported resolution list from the camera's actual RTSP channel capabilities
+        // at runtime rather than a fixed, hopeful list. Dahua's NVR channel capability
+        // isn't queried dynamically here (that would mean parsing undocumented CGI
+        // response fields we haven't verified against this NVR), but the same principle
+        // applies safely as an opt-in: if the user tells us the channel's real native
+        // resolution (nativeWidth/nativeHeight), don't offer HomeKit anything larger —
+        // upscaling a declared-but-undeliverable resolution serves no one.
+        const nativeWidth = cameraConfig.videoConfig?.nativeWidth;
+        const nativeHeight = cameraConfig.videoConfig?.nativeHeight;
+        const allResolutions = [
+            [1920, 1080, maxFPS], [1280, 720, maxFPS], [640, 480, maxFPS], [640, 360, maxFPS],
+            [480, 360, maxFPS], [480, 270, maxFPS], [320, 240, maxFPS], [320, 240, Math.min(maxFPS, 15)], [320, 180, maxFPS],
+        ];
+        const resolutions = (nativeWidth && nativeHeight)
+            ? allResolutions.filter(([w, h]) => w <= nativeWidth && h <= nativeHeight)
+            : allResolutions;
+        if (resolutions.length === 0) {
+            // Native resolution smaller than our smallest declared entry — keep at least
+            // the smallest one rather than declaring nothing.
+            resolutions.push(allResolutions[allResolutions.length - 1]);
         }
         const cameraControllerOptions = {
             cameraStreamCount: cameraConfig.videoConfig?.maxStreams || 2,
@@ -43,10 +66,7 @@ class CameraAccessory {
             streamingOptions: {
                 supportedCryptoSuites: [0 /* this.hap.SRTPCryptoSuites.AES_CM_128_HMAC_SHA1_80 */],
                 video: {
-                    resolutions: [
-                        [1920, 1080, 30], [1280, 720, 30], [640, 480, 30], [640, 360, 30],
-                        [480, 360, 30], [480, 270, 30], [320, 240, 30], [320, 240, 15], [320, 180, 30],
-                    ],
+                    resolutions,
                     codec: {
                         profiles: [0 /* this.hap.H264Profile.BASELINE */, 1 /* this.hap.H264Profile.MAIN */, 2 /* this.hap.H264Profile.HIGH */],
                         levels: [0 /* this.hap.H264Level.LEVEL3_1 */, 1 /* this.hap.H264Level.LEVEL3_2 */, 2 /* this.hap.H264Level.LEVEL4_0 */],
@@ -84,17 +104,17 @@ class CameraAccessory {
                             ],
                         },
                         resolutions: [
-                            [320, 180, 30],
-                            [320, 240, 15],
-                            [320, 240, 30],
-                            [480, 270, 30],
-                            [480, 360, 30],
-                            [640, 360, 30],
-                            [640, 480, 30],
-                            [1280, 720, 30],
-                            [1280, 960, 30],
-                            [1920, 1080, 30],
-                            [1600, 1200, 30],
+                            [320, 180, maxFPS],
+                            [320, 240, Math.min(maxFPS, 15)],
+                            [320, 240, maxFPS],
+                            [480, 270, maxFPS],
+                            [480, 360, maxFPS],
+                            [640, 360, maxFPS],
+                            [640, 480, maxFPS],
+                            [1280, 720, maxFPS],
+                            [1280, 960, maxFPS],
+                            [1920, 1080, maxFPS],
+                            [1600, 1200, maxFPS],
                         ],
                     },
                     audio: {
@@ -111,6 +131,9 @@ class CameraAccessory {
         };
         const cameraController = new this.hap.CameraController(cameraControllerOptions);
         this.accessory.configureController(cameraController);
+        // Give the delegate a way to honestly terminate a HAP session (used by the stall
+        // watchdog) rather than silently managing FFmpeg behind HomeKit's back.
+        this.streamingDelegate.setController(cameraController);
         const motionEnabled = cameraConfig.motion !== false;
         if (motionEnabled) {
             this.motionService = this.accessory.getService(this.hap.Service.MotionSensor) ||

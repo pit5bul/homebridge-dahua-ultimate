@@ -194,6 +194,12 @@
                   "default": false,
                   "description": "Pass camera audio directly without re-encoding. Works if your camera outputs AAC. Disable if audio is silent or choppy."
                 },
+                "copyVideo": {
+                  "title": "Copy Video (no transcoding)",
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Relay the camera's video stream directly with no decode/encode/GPU involvement at all. Only takes effect when Source Video Codec is set to H.264 (the source must already be H.264 — this cannot convert H.265 or resize the stream)."
+                },
                 "vflip": {
                   "title": "Flip Vertically",
                   "type": "boolean",
@@ -403,6 +409,18 @@
                   "default": true,
                   "description": "Leave ON for genuine Dahua-brand channels (fast, direct HTTP). Turn OFF for non-Dahua/ONVIF cameras patched into the NVR — Dahua's snapshot.cgi doesn't work for those and will fail every time. When off, snapshots are grabbed via FFmpeg from the RTSP stream instead (slower, but works for any camera)."
                 },
+                "nativeWidth": {
+                  "title": "Native Width (pixels)",
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "This channel's real native resolution width, if known. HomeKit will never be offered a resolution larger than this. Leave blank if unknown."
+                },
+                "nativeHeight": {
+                  "title": "Native Height (pixels)",
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "This channel's real native resolution height, if known. HomeKit will never be offered a resolution larger than this. Leave blank if unknown."
+                },
                 "stallWatchdog": {
                   "title": "Stall Watchdog",
                   "type": "boolean",
@@ -521,6 +539,9 @@
               "expanded": false,
               "items": [
                 "cameras[].videoConfig.qualityPreset",
+                "cameras[].videoConfig.copyVideo",
+                "cameras[].videoConfig.nativeWidth",
+                "cameras[].videoConfig.nativeHeight",
                 "cameras[].videoConfig.vflip",
                 "cameras[].videoConfig.hflip"
               ]

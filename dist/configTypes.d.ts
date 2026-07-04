@@ -4,12 +4,25 @@ import { PlatformConfig } from 'homebridge';
  */
 export type StreamType = 'mainstream' | 'substream' | 'thirdstream';
 /**
+ * Hardware encoder types
+ */
+export type EncoderType = 'software' | 'vaapi' | 'quicksync' | 'nvenc' | 'amf' | 'videotoolbox' | 'v4l2';
+/**
+ * Quality profile for hardware encoders
+ */
+export type QualityProfile = '' | 'speed' | 'balanced' | 'quality';
+/**
+ * Quality preset — maps to fixed resolution + bitrate
+ */
+export type QualityPreset = '480p-standard' | '720p-standard' | '1080p-standard' | '1080p-hq';
+/**
  * Platform configuration interface
  */
 export interface DahuaPlatformConfig extends PlatformConfig {
     platform: 'DahuaUltimate';
     host: string;
     port?: number;
+    rtspPort?: number;
     secure?: boolean;
     username: string;
     password: string;
@@ -41,46 +54,38 @@ export interface CameraConfig {
     detected?: DetectedStreamInfo;
 }
 /**
- * Hardware encoder types
- */
-export type EncoderType = 'software' | 'vaapi' | 'quicksync' | 'nvenc' | 'amf' | 'videotoolbox' | 'v4l2';
-/**
- * Quality profile for hardware encoders
- */
-export type QualityProfile = '' | 'speed' | 'balanced' | 'quality';
-/**
- * Resolution mode for handling HomeKit adaptive streaming
- */
-export type ResolutionMode = 'adaptive' | 'force-max' | 'force-custom';
-/**
  * Video configuration for a camera
  */
 export interface VideoConfig {
     source?: string;
     stillImageSource?: string;
+    qualityPreset?: QualityPreset;
     maxStreams?: number;
     maxWidth?: number;
     maxHeight?: number;
     maxFPS?: number;
     maxBitrate?: number;
-    minBitrate?: number;
-    resolutionMode?: ResolutionMode;
-    customWidth?: number;
-    customHeight?: number;
-    vcodec?: string;
     encoder?: EncoderType;
     qualityProfile?: QualityProfile;
     encoderOptions?: string;
     hwaccelDevice?: string;
     audio?: boolean;
-    mapvideo?: string;
-    mapaudio?: string;
+    copyAudio?: boolean;
+    copyVideo?: boolean;
     videoFilter?: string;
     vflip?: boolean;
     hflip?: boolean;
     packetSize?: number;
+    codec?: 'h264' | 'h265';
+    nativeSnapshot?: boolean;
+    nativeWidth?: number;
+    nativeHeight?: number;
+    stallWatchdog?: boolean;
+    stallTimeoutMs?: number;
+    forceKeyFrameInterval?: number;
+    probeSize?: number;
+    analyzeDuration?: number;
     debug?: boolean;
-    debugReturn?: boolean;
     recording?: boolean;
     prebuffer?: boolean;
     prebufferLength?: number;

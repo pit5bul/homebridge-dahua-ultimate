@@ -18,7 +18,8 @@ class DahuaDiscovery {
     username;
     password;
     log;
-    constructor(api, host, port, secure, username, password, log) {
+    rtspPort;
+    constructor(api, host, port, secure, username, password, log, rtspPort = 554) {
         this.api = api;
         this.host = host;
         this.port = port;
@@ -26,6 +27,7 @@ class DahuaDiscovery {
         this.username = username;
         this.password = password;
         this.log = log;
+        this.rtspPort = rtspPort;
     }
     /**
      * Get NVR device information
@@ -36,7 +38,7 @@ class DahuaDiscovery {
             const sysInfo = await this.api.get('/cgi-bin/magicBox.cgi?action=getSystemInfo');
             const deviceType = await this.api.get('/cgi-bin/magicBox.cgi?action=getDeviceType');
             return {
-                name: sysInfo.deviceName || sysInfo.machineName,
+                name: sysInfo.machineName || sysInfo.deviceName, // Dahua returns machineName
                 model: deviceType.type || sysInfo.deviceType,
                 serialNumber: sysInfo.serialNumber,
                 firmwareVersion: sysInfo.softwareVersion,
@@ -153,12 +155,13 @@ class DahuaDiscovery {
         }
         const encodedUsername = encodeURIComponent(this.username);
         const encodedPassword = encodeURIComponent(this.password);
-        return `rtsp://${encodedUsername}:${encodedPassword}@${this.host}:${554}/cam/realmonitor?channel=${channelId}&subtype=${subtype}`;
+        const rtspPort = this.rtspPort || 554;
+        return `rtsp://${encodedUsername}:${encodedPassword}@${this.host}:${rtspPort}/cam/realmonitor?channel=${channelId}&subtype=${subtype}`;
     }
     /**
      * Build still image URL for a channel
      */
-    buildStillImageUrl(channelId, streamType = "mainstream") {
+    buildStillImageUrl(channelId, _streamType = "mainstream") {
         // Dahua snapshot API uses 1-based channel indexing (same as RTSP)
         // Auto-detect HTTPS if port is 443
         const protocol = (this.port === 443 || this.secure) ? 'https' : 'http';
@@ -173,13 +176,12 @@ class DahuaDiscovery {
     }
     /**
      * Build FFmpeg still image source string for a channel
+     * @deprecated Snapshots should use DahuaApi.getSnapshot() for proper digest auth.
+     * This method is kept for backward compatibility with existing stored configs.
      */
-    buildFfmpegStillSource(channelId, streamType = "mainstream") {
-        // Dahua snapshot API uses 1-based channel indexing (same as RTSP)
-        // D1 = channel=1, D2 = channel=2, etc.
+    buildFfmpegStillSource(channelId, _streamType = "mainstream") {
         const encodedUsername = encodeURIComponent(this.username);
         const encodedPassword = encodeURIComponent(this.password);
-        // Auto-detect HTTPS if port is 443
         const protocol = (this.port === 443 || this.secure) ? 'https' : 'http';
         const snapshotUrl = `${protocol}://${encodedUsername}:${encodedPassword}@${this.host}:${this.port}/cgi-bin/snapshot.cgi?channel=${channelId}`;
         return `-i ${snapshotUrl}`;

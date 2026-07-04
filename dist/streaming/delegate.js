@@ -4,31 +4,58 @@ exports.StreamingDelegate = void 0;
 const child_process_1 = require("child_process");
 const settings_1 = require("../settings");
 const pick_port_1 = require("pick-port");
+const hwaccel_1 = require("../ffmpeg/hwaccel");
+/**
+ * Architectural principles this file follows, adopted after direct comparison with
+ * homebridge-unifi-protect's real source (protect-stream.ts, homebridge-plugin-utils):
+ *
+ * 1. Never trust a capability just because it's configured or reported — verify it with
+ *    a real test before relying on it (see validateVaapi in ../ffmpeg/hwaccel.ts).
+ * 2. When something breaks mid-session, terminate the HAP session honestly via the
+ *    official CameraController API and let HomeKit's own retry logic recover, rather
+ *    than silently swapping the underlying process behind HomeKit's back.
+ * 3. Build FFmpeg arguments as a typed array, one argument per push, not a giant
+ *    template string — this is what makes every other change here auditable, and it's
+ *    what let a real port-mismatch bug hide undetected across several releases.
+ * 4. Avoid transcoding entirely when the source already satisfies HomeKit's
+ *    requirements (see the stream-copy path for already-H.264 sources).
+ */
 class StreamingDelegate {
     cameraConfig;
     log;
     hap;
     videoConfig;
     videoProcessor;
+    dahuaApi;
+    controller;
     pendingSessions = new Map();
     activeSessions = new Map();
     cachedSnapshot;
     cachedSnapshotTime = 0;
-    constructor(hap, cameraConfig, videoProcessor, log) {
+    constructor(hap, cameraConfig, videoProcessor, log, dahuaApi) {
         this.cameraConfig = cameraConfig;
         this.log = log;
         this.hap = hap;
         this.videoProcessor = videoProcessor;
         this.videoConfig = { ...settings_1.DEFAULT_VIDEO_CONFIG, ...cameraConfig.videoConfig };
+        this.dahuaApi = dahuaApi;
     }
-    determineResolution(request, isSnapshot) {
+    /**
+     * Wires up the CameraController reference after it's constructed (camera.ts creates
+     * this delegate before the controller exists, so it can't be passed in the
+     * constructor). Required for clean, honest session termination — see stopStream and
+     * the stall watchdog below, both of which call controller.forceStopStreamingSession()
+     * rather than silently managing the FFmpeg process behind HomeKit's back.
+     */
+    setController(controller) {
+        this.controller = controller;
+    }
+    determineResolution(request, isSnapshot, resolvedEncoder) {
         const resInfo = { width: 0, height: 0 };
         let requestedWidth = request.width;
         let requestedHeight = request.height;
         const maxWidth = Math.min(this.videoConfig.maxWidth || settings_1.HOMEKIT_MAX_WIDTH, settings_1.HOMEKIT_MAX_WIDTH);
         const maxHeight = Math.min(this.videoConfig.maxHeight || settings_1.HOMEKIT_MAX_HEIGHT, settings_1.HOMEKIT_MAX_HEIGHT);
-        // qualityPreset acts as a floor for streaming — force the preset resolution
-        // regardless of what HomeKit requests (HomeKit always starts low as a probe)
         if (!isSnapshot && this.videoConfig.qualityPreset) {
             requestedWidth = maxWidth;
             requestedHeight = maxHeight;
@@ -39,28 +66,29 @@ class StreamingDelegate {
             requestedHeight = maxHeight;
         resInfo.width = requestedWidth;
         resInfo.height = requestedHeight;
-        // Determine if we're using hardware encoder
-        const encoder = this.videoConfig.encoder || 'software';
+        // Use the resolved encoder (post hardware-validation) when supplied, not the
+        // static config value — otherwise a VAAPI validation failure that downgrades
+        // the actual encoder to software never reaches this method, and it keeps
+        // building a scale_vaapi filter for a plain software encoder that can't use
+        // it. FFmpeg then fails immediately: "Impossible to convert between the
+        // formats supported by the filter" — the encoder and filter were disagreeing
+        // about whether hardware frames exist at all.
+        const encoder = resolvedEncoder ?? (this.videoConfig.encoder || 'software');
         const useHardwareAccel = encoder !== 'software' && !isSnapshot;
         if (resInfo.width > 0 || resInfo.height > 0) {
             const filters = [];
-            // Add flip filters first (work on software or hardware frames)
             if (this.videoConfig.hflip)
                 filters.push('hflip');
             if (this.videoConfig.vflip)
                 filters.push('vflip');
             if (useHardwareAccel) {
-                // Hardware acceleration path
                 if (encoder === 'vaapi') {
-                    // FULL GPU: Hardware decode → GPU scale → Hardware encode
                     filters.push('scale_vaapi=' +
                         (resInfo.width > 0 ? `w='min(${resInfo.width},iw)'` : 'w=iw') + ':' +
                         (resInfo.height > 0 ? `h='min(${resInfo.height},ih)'` : 'h=ih') +
                         ':format=nv12');
                 }
                 else if (encoder === 'amf') {
-                    // AMF accepts software frames directly (NV12)
-                    // Just scale and convert to NV12, AMF will upload internally
                     filters.push('scale=' +
                         (resInfo.width > 0 ? `'min(${resInfo.width},iw)'` : 'iw') + ':' +
                         (resInfo.height > 0 ? `'min(${resInfo.height},ih)'` : 'ih') +
@@ -68,7 +96,6 @@ class StreamingDelegate {
                     filters.push('format=nv12');
                 }
                 else if (encoder === 'quicksync') {
-                    // Software decode → QuickSync encode
                     filters.push('scale=' +
                         (resInfo.width > 0 ? `'min(${resInfo.width},iw)'` : 'iw') + ':' +
                         (resInfo.height > 0 ? `'min(${resInfo.height},ih)'` : 'ih') +
@@ -77,7 +104,6 @@ class StreamingDelegate {
                     filters.push('hwupload=extra_hw_frames=64');
                 }
                 else if (encoder === 'nvenc') {
-                    // Software decode → NVENC encode
                     filters.push('scale=' +
                         (resInfo.width > 0 ? `'min(${resInfo.width},iw)'` : 'iw') + ':' +
                         (resInfo.height > 0 ? `'min(${resInfo.height},ih)'` : 'ih') +
@@ -87,13 +113,11 @@ class StreamingDelegate {
                 }
             }
             else {
-                // Software path
                 filters.push('scale=' +
                     (resInfo.width > 0 ? `'min(${resInfo.width},iw)'` : 'iw') + ':' +
                     (resInfo.height > 0 ? `'min(${resInfo.height},ih)'` : 'ih') +
                     ':force_original_aspect_ratio=decrease');
             }
-            // Add custom video filter if provided (and not already hardware scale)
             if (this.videoConfig.videoFilter && !this.videoConfig.videoFilter.includes('scale_')) {
                 filters.push(this.videoConfig.videoFilter);
             }
@@ -105,14 +129,31 @@ class StreamingDelegate {
     }
     async handleSnapshotRequest(request, callback) {
         const resolution = this.determineResolution(request, true);
-        this.log.debug(`Snapshot request: ${request.width}x${request.height} -> ${resolution.width}x${resolution.height}`, this.cameraConfig.name);
+        this.log.info(`Snapshot request: ${request.width}x${request.height} -> ${resolution.width}x${resolution.height}`, this.cameraConfig.name);
         const now = Date.now();
         if (this.cachedSnapshot && now - this.cachedSnapshotTime < 3000) {
             this.log.debug('Returning cached snapshot', this.cameraConfig.name);
             callback(undefined, this.cachedSnapshot);
             return;
         }
-        const source = this.videoConfig.stillImageSource || this.videoConfig.source;
+        if (this.dahuaApi && this.videoConfig.nativeSnapshot !== false) {
+            try {
+                this.log.info(`Snapshot fetch: channel=${this.cameraConfig.channelId}`, this.cameraConfig.name);
+                const jpeg = await this.dahuaApi.getSnapshot(this.cameraConfig.channelId);
+                this.cachedSnapshot = jpeg;
+                this.cachedSnapshotTime = Date.now();
+                this.log.info(`Snapshot captured: ${jpeg.length} bytes`, this.cameraConfig.name);
+                callback(undefined, jpeg);
+            }
+            catch (err) {
+                this.log.error(`Snapshot failed: ${err}`, this.cameraConfig.name);
+                callback(err);
+            }
+            return;
+        }
+        const source = this.videoConfig.nativeSnapshot === false
+            ? (this.videoConfig.source || this.videoConfig.stillImageSource)
+            : (this.videoConfig.stillImageSource || this.videoConfig.source);
         if (!source) {
             this.log.error('No source configured', this.cameraConfig.name);
             callback(new Error('No source configured'));
@@ -148,19 +189,17 @@ class StreamingDelegate {
             }
             this.cachedSnapshot = snapshot;
             this.cachedSnapshotTime = Date.now();
-            this.log.debug(`Snapshot captured: ${snapshot.length} bytes`, this.cameraConfig.name);
+            this.log.info(`Snapshot captured: ${snapshot.length} bytes`, this.cameraConfig.name);
             callback(undefined, snapshot);
         });
         setTimeout(() => { if (!ffmpeg.killed) {
             ffmpeg.kill('SIGKILL');
             this.log.warn('Snapshot timeout', this.cameraConfig.name);
-        } }, 15000);
+        } }, 10000);
     }
     async prepareStream(request, callback) {
         const ipv6 = request.addressVersion === 'ipv6';
-        const videoPort = await (0, pick_port_1.pickPort)({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
         const videoReturnPort = await (0, pick_port_1.pickPort)({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
-        const audioPort = await (0, pick_port_1.pickPort)({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
         const audioReturnPort = await (0, pick_port_1.pickPort)({ type: 'udp', ip: ipv6 ? '::' : '0.0.0.0', reserveTimeout: 15 });
         const sessionInfo = {
             address: request.targetAddress,
@@ -178,8 +217,8 @@ class StreamingDelegate {
         };
         this.pendingSessions.set(request.sessionID, sessionInfo);
         const response = {
-            video: { port: videoPort, ssrc: sessionInfo.videoSSRC, srtp_key: request.video.srtp_key, srtp_salt: request.video.srtp_salt },
-            audio: { port: audioPort, ssrc: sessionInfo.audioSSRC, srtp_key: request.audio.srtp_key, srtp_salt: request.audio.srtp_salt },
+            video: { port: videoReturnPort, ssrc: sessionInfo.videoSSRC, srtp_key: request.video.srtp_key, srtp_salt: request.video.srtp_salt },
+            audio: { port: audioReturnPort, ssrc: sessionInfo.audioSSRC, srtp_key: request.audio.srtp_key, srtp_salt: request.audio.srtp_salt },
         };
         this.log.debug(`Stream prepared: ${request.targetAddress}:${request.video.port}`, this.cameraConfig.name);
         callback(undefined, response);
@@ -187,10 +226,9 @@ class StreamingDelegate {
     handleStreamRequest(request, callback) {
         switch (request.type) {
             case "start" /* StreamRequestTypes.START */:
-                this.startStream(request, callback);
+                void this.startStream(request, callback);
                 break;
             case "reconfigure" /* StreamRequestTypes.RECONFIGURE */:
-                // qualityPreset forces the start resolution so RECONFIGURE is a no-op
                 if ('video' in request) {
                     this.log.debug(`Reconfigure ignored (already at preset resolution): ${request.video.width}x${request.video.height}`, this.cameraConfig.name);
                 }
@@ -202,7 +240,7 @@ class StreamingDelegate {
                 break;
         }
     }
-    startStream(request, callback) {
+    async startStream(request, callback) {
         const sessionInfo = this.pendingSessions.get(request.sessionID);
         if (!sessionInfo) {
             this.log.error('Session not found', this.cameraConfig.name);
@@ -210,40 +248,42 @@ class StreamingDelegate {
             return;
         }
         this.pendingSessions.delete(request.sessionID);
-        // Type guard to ensure we have video info
         if (!('video' in request)) {
             this.log.error('No video info in start request', this.cameraConfig.name);
             callback(new Error('Invalid request'));
             return;
         }
-        const resolution = this.determineResolution(request.video, false);
+        // Principle 1: never trust a hardware acceleration method just because it's
+        // configured. Validate it with a real test first; fall back to software
+        // automatically and audibly if validation fails, rather than discovering the
+        // failure deep inside a live stream attempt. This must happen BEFORE
+        // determineResolution() below — that method picks the video filter based on
+        // which encoder will actually run, and a stale/unresolved encoder value here
+        // would cause it to build a hardware-only filter for a software encoder.
+        let encoder = this.videoConfig.encoder || 'software';
+        if (encoder === 'vaapi') {
+            const device = this.videoConfig.hwaccelDevice || '/dev/dri/renderD128';
+            const valid = await (0, hwaccel_1.validateVaapi)(this.videoProcessor, device, this.log, this.cameraConfig.name || 'Camera');
+            if (!valid) {
+                encoder = 'software';
+            }
+        }
+        const resolution = this.determineResolution(request.video, false, encoder);
         let bitrate = request.video.max_bit_rate;
         if (this.videoConfig.maxBitrate && bitrate > this.videoConfig.maxBitrate)
             bitrate = this.videoConfig.maxBitrate;
-        // qualityPreset bitrate is a floor — don't let HomeKit's probe bitrate win
         if (this.videoConfig.qualityPreset) {
             const presetBitrate = settings_1.QUALITY_PRESETS[this.videoConfig.qualityPreset]?.maxBitrate;
             if (presetBitrate && bitrate < presetBitrate)
                 bitrate = presetBitrate;
         }
         this.log.info(`Starting stream: ${resolution.width}x${resolution.height} ${bitrate}kbps`, this.cameraConfig.name);
-        // Log encoder and pipeline being used
-        const encoder = this.videoConfig.encoder || 'software';
         const vcodec = this.deriveVcodec(encoder);
         if (encoder === 'software') {
             this.log.info(`Video encoder: ${vcodec} (software)`, this.cameraConfig.name);
         }
         else if (encoder === 'vaapi') {
             this.log.info(`Video encoder: ${vcodec} (VAAPI - FULL GPU: hw decode+scale+encode)`, this.cameraConfig.name);
-        }
-        else if (encoder === 'amf') {
-            this.log.info(`Video encoder: ${vcodec} (AMF - CPU decode+scale, GPU encode)`, this.cameraConfig.name);
-        }
-        else if (encoder === 'quicksync') {
-            this.log.info(`Video encoder: ${vcodec} (QuickSync)`, this.cameraConfig.name);
-        }
-        else if (encoder === 'nvenc') {
-            this.log.info(`Video encoder: ${vcodec} (NVENC)`, this.cameraConfig.name);
         }
         else {
             this.log.info(`Video encoder: ${vcodec} (${encoder})`, this.cameraConfig.name);
@@ -254,18 +294,53 @@ class StreamingDelegate {
             callback(new Error('No source configured'));
             return;
         }
-        const ffmpegArgs = this.buildFfmpegArgs(source, sessionInfo, resolution, bitrate, request);
-        this.log.debug(`FFmpeg command: ${this.videoProcessor} ${ffmpegArgs}`, this.cameraConfig.name);
+        // Principle 4: avoid transcoding entirely when the source already satisfies
+        // HomeKit's requirements. If the camera's source is already H.264 and the user
+        // has opted into stream copy, skip decode+encode entirely — no GPU, no CPU
+        // encode, none of the failure modes either one carries. Stream copy cannot
+        // resize, so this only applies when the source resolution is what HomeKit gets.
+        const canCopy = this.videoConfig.copyVideo === true && this.videoConfig.codec === 'h264';
+        const ffmpegArgs = this.buildFfmpegArgs(source, sessionInfo, resolution, bitrate, request, encoder, vcodec, canCopy);
+        this.log.debug(`FFmpeg command: ${this.videoProcessor} ${ffmpegArgs.join(' ')}`, this.cameraConfig.name);
         if (this.videoConfig.audio) {
             const audioCodecName = 'audio' in request && request.audio.codec === "OPUS" /* AudioStreamingCodecType.OPUS */ ? 'OPUS' :
                 'audio' in request && request.audio.codec === "AAC-eld" /* AudioStreamingCodecType.AAC_ELD */ ? 'AAC-eld' : 'unknown';
             this.log.info(`Audio enabled: ${audioCodecName}`, this.cameraConfig.name);
         }
-        // Split the command string into array for spawn
-        const args = ffmpegArgs.split(/\s+/).filter(arg => arg.length > 0);
-        const ffmpeg = (0, child_process_1.spawn)(this.videoProcessor, args, { env: process.env });
-        const activeSession = { sessionInfo, videoProcess: ffmpeg };
+        const activeSession = {
+            sessionInfo,
+            lastFrame: 0,
+            lastFrameChangeTime: Date.now(),
+        };
         this.activeSessions.set(request.sessionID, activeSession);
+        this.spawnFfmpegProcess(request.sessionID, ffmpegArgs);
+        if (this.videoConfig.stallWatchdog !== false) {
+            this.startStallWatchdog(request.sessionID);
+        }
+        callback();
+    }
+    spawnFfmpegProcess(sessionID, args) {
+        const activeSession = this.activeSessions.get(sessionID);
+        if (!activeSession)
+            return;
+        const ffmpeg = (0, child_process_1.spawn)(this.videoProcessor, args, { env: process.env });
+        activeSession.videoProcess = ffmpeg;
+        let progressBuffer = '';
+        ffmpeg.stdout?.on('data', (data) => {
+            progressBuffer += data.toString();
+            const lines = progressBuffer.split('\n');
+            progressBuffer = lines.pop() || '';
+            for (const line of lines) {
+                const match = line.match(/^frame=(\d+)/);
+                if (match) {
+                    const frame = parseInt(match[1], 10);
+                    if (frame !== activeSession.lastFrame) {
+                        activeSession.lastFrame = frame;
+                        activeSession.lastFrameChangeTime = Date.now();
+                    }
+                }
+            }
+        });
         ffmpeg.stderr?.on('data', (data) => {
             if (this.videoConfig.debug) {
                 const lines = data.toString().split('\n');
@@ -275,189 +350,203 @@ class StreamingDelegate {
                 }
             }
         });
-        ffmpeg.on('error', (err) => { this.log.error(`FFmpeg error: ${err.message}`, this.cameraConfig.name); this.stopStream(request.sessionID); });
-        ffmpeg.on('close', (code) => { if (code !== 0 && code !== null)
-            this.log.warn(`FFmpeg exited with code ${code}`, this.cameraConfig.name); this.stopStream(request.sessionID); });
-        callback();
+        ffmpeg.on('error', (err) => {
+            this.log.error(`FFmpeg error: ${err.message}`, this.cameraConfig.name);
+            if (activeSession.videoProcess === ffmpeg)
+                this.stopStream(sessionID);
+        });
+        ffmpeg.on('close', (code) => {
+            if (activeSession.videoProcess !== ffmpeg)
+                return;
+            if (code !== 0 && code !== null)
+                this.log.warn(`FFmpeg exited with code ${code}`, this.cameraConfig.name);
+            this.stopStream(sessionID);
+        });
     }
-    buildFfmpegArgs(source, sessionInfo, resolution, bitrate, request) {
-        const encoder = this.videoConfig.encoder || 'software';
-        const vcodec = this.deriveVcodec(encoder);
-        const mtu = this.videoConfig.packetSize || 1316;
-        let encoderOptions = this.videoConfig.encoderOptions;
-        // Quality profile for hardware encoders - OPTIONAL
-        // Only apply if user explicitly set a profile (not empty string)
-        const qualityProfile = this.videoConfig.qualityProfile;
-        let gopSize = 0; // 0 = don't add -g flag
-        let bframes = -1; // -1 = don't add -bf flag
-        // Set default encoder options based on actual vcodec being used
-        // KEEP MINIMAL - many hardware encoders work best with NO options!
-        if (!encoderOptions) {
-            if (vcodec === 'libx264') {
-                encoderOptions = '-preset ultrafast -tune zerolatency';
-            }
-            else if (vcodec === 'h264_vaapi') {
-                // VAAPI - Only apply quality profile if user selected one
-                if (qualityProfile === 'speed') {
-                    gopSize = 25;
-                    bframes = 0;
-                    encoderOptions = '-quality 1';
-                }
-                else if (qualityProfile === 'quality') {
-                    gopSize = 13;
-                    bframes = 2;
-                    encoderOptions = '-quality 7';
-                }
-                else if (qualityProfile === 'balanced') {
-                    gopSize = 19;
-                    bframes = 0;
-                    encoderOptions = '-quality 4';
-                }
-                else {
-                    // No profile selected (empty or undefined) - use VAAPI defaults
-                    encoderOptions = '';
-                }
-            }
-            else if (vcodec === 'h264_amf') {
-                // AMF - Only apply quality profile if user selected one
-                if (qualityProfile === 'speed') {
-                    gopSize = 25;
-                    bframes = 0;
-                    encoderOptions = '-usage transcoding -quality speed';
-                }
-                else if (qualityProfile === 'quality') {
-                    gopSize = 13;
-                    bframes = 2;
-                    encoderOptions = '-usage transcoding -quality quality';
-                }
-                else if (qualityProfile === 'balanced') {
-                    gopSize = 19;
-                    bframes = 0;
-                    encoderOptions = '-usage transcoding -quality balanced';
-                }
-                else {
-                    // No profile - minimal AMF options
-                    encoderOptions = '-usage transcoding';
-                }
-            }
-            else if (vcodec === 'h264_qsv') {
-                // QuickSync - Only apply quality profile if user selected one
-                if (qualityProfile === 'speed') {
-                    gopSize = 25;
-                    bframes = 0;
-                    encoderOptions = '-preset veryfast';
-                }
-                else if (qualityProfile === 'quality') {
-                    gopSize = 13;
-                    bframes = 2;
-                    encoderOptions = '-preset slow';
-                }
-                else if (qualityProfile === 'balanced') {
-                    gopSize = 19;
-                    bframes = 0;
-                    encoderOptions = '-preset medium';
-                }
-                else {
-                    // No profile - minimal QuickSync
-                    encoderOptions = '-preset medium';
-                }
-            }
-            else if (vcodec.includes('nvenc')) {
-                // NVENC - Only apply quality profile if user selected one
-                if (qualityProfile === 'speed') {
-                    gopSize = 25;
-                    bframes = 0;
-                    encoderOptions = '-preset p1 -tune ll';
-                }
-                else if (qualityProfile === 'quality') {
-                    gopSize = 13;
-                    bframes = 2;
-                    encoderOptions = '-preset p7 -tune hq';
-                }
-                else if (qualityProfile === 'balanced') {
-                    gopSize = 19;
-                    bframes = 0;
-                    encoderOptions = '-preset p4 -tune ll';
-                }
-                else {
-                    // No profile - minimal NVENC
-                    encoderOptions = '-preset p4 -tune ll';
-                }
-            }
-            else {
-                // For any other codec, don't add encoder options
-                encoderOptions = '';
-            }
-        }
-        // Type guards
+    /**
+     * Principle 2: when the video pipeline stalls, terminate the session honestly.
+     *
+     * The previous approach (homebridge-dahua-ultimate, up through 2.0.12) silently
+     * killed and respawned FFmpeg in place, reusing the same HAP session and hoping
+     * HomeKit wouldn't notice. Comparing against homebridge-unifi-protect's actual
+     * FfmpegStreamingProcess showed a different, more honest design: detect the same
+     * class of failure (there, via a UDP progress canary; here, via the same frame
+     * counter this plugin already tracked), then call the official, public
+     * CameraController.forceStopStreamingSession() API and let HomeKit's own
+     * reconnection logic establish a fresh session. We stop trying to be clever behind
+     * HomeKit's back and instead tell it the truth as soon as we know it.
+     */
+    startStallWatchdog(sessionID) {
+        const activeSession = this.activeSessions.get(sessionID);
+        if (!activeSession)
+            return;
+        const stallTimeoutMs = this.videoConfig.stallTimeoutMs ?? settings_1.DEFAULT_STALL_TIMEOUT_MS;
+        activeSession.watchdogTimer = setInterval(() => {
+            const session = this.activeSessions.get(sessionID);
+            if (!session)
+                return;
+            const stalledMs = Date.now() - (session.lastFrameChangeTime ?? Date.now());
+            if (stalledMs < stallTimeoutMs)
+                return;
+            this.log.warn(`⚠️ STALL WATCHDOG: frame counter frozen at ${session.lastFrame} for ${stalledMs}ms — ` +
+                'ending this session honestly and letting HomeKit reconnect', this.cameraConfig.name);
+            if (session.watchdogTimer)
+                clearInterval(session.watchdogTimer);
+            this.controller?.forceStopStreamingSession(sessionID);
+            this.stopStream(sessionID);
+        }, settings_1.STALL_CHECK_INTERVAL_MS);
+    }
+    buildFfmpegArgs(source, sessionInfo, resolution, bitrate, request, encoder, vcodec, canCopy) {
         if (!('video' in request)) {
             throw new Error('No video info in request');
         }
-        // Start building command
-        let ffmpegArgs = '';
-        // Hardware acceleration setup
-        if (encoder === 'vaapi') {
-            // FULL GPU: Hardware decode + scale + encode
+        const args = [];
+        const mtu = this.videoConfig.packetSize || 1316;
+        if (encoder === 'vaapi' && !canCopy) {
             const hwDevice = this.videoConfig.hwaccelDevice || '/dev/dri/renderD128';
-            ffmpegArgs += `-hwaccel vaapi -hwaccel_device ${hwDevice} -hwaccel_output_format vaapi `;
+            args.push('-hwaccel', 'vaapi', '-hwaccel_device', hwDevice, '-hwaccel_output_format', 'vaapi');
         }
-        else if (encoder === 'quicksync') {
-            ffmpegArgs += `-init_hw_device qsv=hw `;
+        else if (encoder === 'quicksync' && !canCopy) {
+            args.push('-init_hw_device', 'qsv=hw');
         }
-        else if (encoder === 'nvenc') {
-            ffmpegArgs += `-init_hw_device cuda=cu:0 `;
+        else if (encoder === 'nvenc' && !canCopy) {
+            args.push('-init_hw_device', 'cuda=cu:0');
         }
-        // AMF doesn't need special init - it accepts software frames
-        // Modify source to skip audio track if audio is disabled
-        let modifiedSource = source;
-        if (!this.videoConfig.audio && source.includes('rtsp://')) {
-            // Insert -allowed_media_types video before -i to skip audio during RTSP connection
-            modifiedSource = source.replace(/-i\s+/, '-allowed_media_types video -i ');
+        if (!this.videoConfig.audio)
+            args.push('-allowed_media_types', 'video');
+        const codecDefaults = this.videoConfig.codec ? settings_1.PROBE_DEFAULTS_BY_CODEC[this.videoConfig.codec] : undefined;
+        const probeSize = this.videoConfig.probeSize !== undefined ? this.videoConfig.probeSize : codecDefaults?.probeSize;
+        const analyzeDuration = this.videoConfig.analyzeDuration !== undefined ? this.videoConfig.analyzeDuration : codecDefaults?.analyzeDuration;
+        if (probeSize !== undefined || analyzeDuration !== undefined) {
+            args.push('-probesize', String(probeSize ?? 5000000), '-analyzeduration', String(analyzeDuration ?? 5000000));
         }
-        // Reduce FFmpeg stream analysis time to minimize startup delay
-        modifiedSource = modifiedSource.replace(/-i\s+/, '-probesize 32 -analyzeduration 0 -i ');
-        // Add source (includes -i)
-        ffmpegArgs += modifiedSource;
-        // Video encoding settings
-        const isHardwareEncoder = encoder !== 'software';
-        const pixFmt = isHardwareEncoder ? '' : ' -pix_fmt yuv420p'; // Only set for software
-        const colorRange = (isHardwareEncoder && encoder !== 'vaapi') ? ' -color_range mpeg' : ''; // Skip for VAAPI (conflicts with scale_vaapi)
-        const gopParams = gopSize > 0 ? ` -g ${gopSize}` : ''; // Only add if quality profile set
-        const bframeParams = bframes >= 0 ? ` -bf ${bframes}` : ''; // Only add if quality profile set (-1 = skip)
-        ffmpegArgs += `${' -an -sn -dn'} -codec:v ${vcodec}${pixFmt}${colorRange}${resolution.videoFilter ? ` -filter:v ${resolution.videoFilter}` : ''}${encoderOptions ? ` ${encoderOptions}` : ''}${bframeParams}${gopParams}${bitrate > 0 ? ` -b:v ${bitrate}k` : ''} -payload_type ${'pt' in request.video ? request.video.pt : 99}`;
-        // Video Stream
-        ffmpegArgs += ` -ssrc ${sessionInfo.videoSSRC} -f rtp`
-            + ` -srtp_out_suite AES_CM_128_HMAC_SHA1_80`
-            + ` -srtp_out_params ${sessionInfo.videoSRTP.toString('base64')} srtp://${sessionInfo.address}:${sessionInfo.videoPort}?rtcpport=${sessionInfo.videoPort}&pkt_size=${mtu}`;
-        // Audio (if enabled)
+        const sourceParts = source.split(/\s+/).filter((p) => p.length > 0);
+        args.push(...sourceParts);
+        args.push('-an', '-sn', '-dn');
+        if (canCopy) {
+            args.push('-codec:v', 'copy');
+        }
+        else {
+            const { encoderOptions, gopSize, bframes } = this.getEncoderOptions(vcodec);
+            args.push('-codec:v', vcodec);
+            const h264ProfileNames = ['baseline', 'main', 'high'];
+            const h264LevelNames = ['3.1', '3.2', '4.0'];
+            const profileIndex = 'profile' in request.video ? request.video.profile : undefined;
+            const levelIndex = 'level' in request.video ? request.video.level : undefined;
+            const profileName = profileIndex !== undefined ? h264ProfileNames[profileIndex] : undefined;
+            const levelName = levelIndex !== undefined ? h264LevelNames[levelIndex] : undefined;
+            if (profileName || levelName) {
+                this.log.info(`HomeKit negotiated: profile=${profileName ?? 'unknown'} level=${levelName ?? 'unknown'}`, this.cameraConfig.name);
+            }
+            if (profileName)
+                args.push('-profile:v', profileName);
+            if (levelName)
+                args.push('-level:v', levelName);
+            const isHardwareEncoder = encoder !== 'software';
+            if (!isHardwareEncoder)
+                args.push('-pix_fmt', 'yuv420p');
+            if (isHardwareEncoder && encoder !== 'vaapi')
+                args.push('-color_range', 'mpeg');
+            if (resolution.videoFilter)
+                args.push('-filter:v', resolution.videoFilter);
+            if (encoderOptions.length > 0)
+                args.push(...encoderOptions);
+            if (bframes >= 0)
+                args.push('-bf', String(bframes));
+            if (gopSize > 0)
+                args.push('-g', String(gopSize));
+            const keyframeInterval = this.videoConfig.forceKeyFrameInterval ?? settings_1.DEFAULT_FORCE_KEYFRAME_INTERVAL_SECONDS;
+            args.push('-force_key_frames', `expr:gte(t,n_forced*${keyframeInterval})`);
+            if (bitrate > 0)
+                args.push('-b:v', `${bitrate}k`);
+        }
+        args.push('-payload_type', String('pt' in request.video ? request.video.pt : 99));
+        args.push('-ssrc', String(sessionInfo.videoSSRC));
+        args.push('-f', 'rtp');
+        args.push('-srtp_out_suite', 'AES_CM_128_HMAC_SHA1_80');
+        args.push('-srtp_out_params', sessionInfo.videoSRTP.toString('base64'));
+        args.push(`srtp://${sessionInfo.address}:${sessionInfo.videoPort}?rtcpport=${sessionInfo.videoPort}&localrtcpport=${sessionInfo.videoReturnPort}&pkt_size=${mtu}`);
         if (this.videoConfig.audio && 'audio' in request) {
             if (request.audio.codec === "OPUS" /* AudioStreamingCodecType.OPUS */ || request.audio.codec === "AAC-eld" /* AudioStreamingCodecType.AAC_ELD */) {
-                // Use copy if enabled and codec is compatible, otherwise transcode
                 const useAudioCopy = this.videoConfig.copyAudio === true;
-                ffmpegArgs // Audio
-                    += `${' -vn -sn -dn'
-                        + (useAudioCopy
-                            ? ' -codec:a copy'
-                            : request.audio.codec === "OPUS" /* AudioStreamingCodecType.OPUS */
-                                ? ' -codec:a libopus'
-                                    + ' -application lowdelay'
-                                : ' -codec:a libfdk_aac'
-                                    + ' -profile:a aac_eld')} -flags +global_header`
-                        + ` -f rtp`
-                        + (useAudioCopy ? '' : ` -ar ${request.audio.sample_rate}k`)
-                        + ` -b:a ${request.audio.max_bit_rate}k`
-                        + ` -ac ${request.audio.channel} -payload_type ${'pt' in request.audio ? request.audio.pt : 110}`;
-                ffmpegArgs // Audio Stream
-                    += ` -ssrc ${sessionInfo.audioSSRC} -f rtp`
-                        + ` -srtp_out_suite AES_CM_128_HMAC_SHA1_80`
-                        + ` -srtp_out_params ${sessionInfo.audioSRTP.toString('base64')} srtp://${sessionInfo.address}:${sessionInfo.audioPort}?rtcpport=${sessionInfo.audioPort}&pkt_size=188`;
+                args.push('-vn', '-sn', '-dn');
+                if (useAudioCopy) {
+                    args.push('-codec:a', 'copy');
+                }
+                else if (request.audio.codec === "OPUS" /* AudioStreamingCodecType.OPUS */) {
+                    args.push('-codec:a', 'libopus', '-application', 'lowdelay');
+                }
+                else {
+                    args.push('-codec:a', 'libfdk_aac', '-profile:a', 'aac_eld');
+                }
+                args.push('-flags', '+global_header');
+                args.push('-f', 'rtp');
+                if (!useAudioCopy) {
+                    args.push('-ar', `${request.audio.sample_rate}k`);
+                    args.push('-b:a', `${request.audio.max_bit_rate}k`);
+                }
+                args.push('-ac', String(request.audio.channel));
+                args.push('-payload_type', String('pt' in request.audio ? request.audio.pt : 110));
+                args.push('-ssrc', String(sessionInfo.audioSSRC));
+                args.push('-f', 'rtp');
+                args.push('-srtp_out_suite', 'AES_CM_128_HMAC_SHA1_80');
+                args.push('-srtp_out_params', sessionInfo.audioSRTP.toString('base64'));
+                args.push(`srtp://${sessionInfo.address}:${sessionInfo.audioPort}?rtcpport=${sessionInfo.audioPort}&localrtcpport=${sessionInfo.audioReturnPort}&pkt_size=188`);
             }
             else {
                 this.log.error(`Unsupported audio codec requested: ${request.audio.codec}`, this.cameraConfig.name);
             }
         }
-        ffmpegArgs += ` -loglevel level${this.videoConfig.debug ? '+verbose' : ''} -progress pipe:1`;
-        return ffmpegArgs;
+        args.push('-loglevel', `level${this.videoConfig.debug ? '+verbose' : ''}`);
+        args.push('-progress', 'pipe:1');
+        return args;
+    }
+    getEncoderOptions(vcodec) {
+        const qualityProfile = this.videoConfig.qualityProfile;
+        const explicit = this.videoConfig.encoderOptions;
+        if (explicit) {
+            return { encoderOptions: explicit.split(/\s+/).filter((s) => s.length > 0), gopSize: 0, bframes: -1 };
+        }
+        if (vcodec === 'libx264') {
+            return { encoderOptions: ['-preset', 'ultrafast', '-tune', 'zerolatency'], gopSize: 0, bframes: -1 };
+        }
+        if (vcodec === 'h264_vaapi') {
+            if (qualityProfile === 'speed')
+                return { encoderOptions: ['-quality', '1'], gopSize: 25, bframes: 0 };
+            if (qualityProfile === 'quality')
+                return { encoderOptions: ['-quality', '7'], gopSize: 13, bframes: 2 };
+            if (qualityProfile === 'balanced')
+                return { encoderOptions: ['-quality', '4'], gopSize: 19, bframes: 0 };
+            return { encoderOptions: [], gopSize: 0, bframes: -1 };
+        }
+        if (vcodec === 'h264_amf') {
+            if (qualityProfile === 'speed')
+                return { encoderOptions: ['-usage', 'transcoding', '-quality', 'speed'], gopSize: 25, bframes: 0 };
+            if (qualityProfile === 'quality')
+                return { encoderOptions: ['-usage', 'transcoding', '-quality', 'quality'], gopSize: 13, bframes: 2 };
+            if (qualityProfile === 'balanced')
+                return { encoderOptions: ['-usage', 'transcoding', '-quality', 'balanced'], gopSize: 19, bframes: 0 };
+            return { encoderOptions: ['-usage', 'transcoding'], gopSize: 0, bframes: -1 };
+        }
+        if (vcodec === 'h264_qsv') {
+            if (qualityProfile === 'speed')
+                return { encoderOptions: ['-preset', 'veryfast'], gopSize: 25, bframes: 0 };
+            if (qualityProfile === 'quality')
+                return { encoderOptions: ['-preset', 'slow'], gopSize: 13, bframes: 2 };
+            if (qualityProfile === 'balanced')
+                return { encoderOptions: ['-preset', 'medium'], gopSize: 19, bframes: 0 };
+            return { encoderOptions: ['-preset', 'medium'], gopSize: 0, bframes: -1 };
+        }
+        if (vcodec.includes('nvenc')) {
+            if (qualityProfile === 'speed')
+                return { encoderOptions: ['-preset', 'p1', '-tune', 'll'], gopSize: 25, bframes: 0 };
+            if (qualityProfile === 'quality')
+                return { encoderOptions: ['-preset', 'p7', '-tune', 'hq'], gopSize: 13, bframes: 2 };
+            if (qualityProfile === 'balanced')
+                return { encoderOptions: ['-preset', 'p4', '-tune', 'll'], gopSize: 19, bframes: 0 };
+            return { encoderOptions: ['-preset', 'p4', '-tune', 'll'], gopSize: 0, bframes: -1 };
+        }
+        return { encoderOptions: [], gopSize: 0, bframes: -1 };
     }
     deriveVcodec(encoder) {
         if (encoder === 'vaapi')
@@ -483,6 +572,8 @@ class StreamingDelegate {
             session.videoProcess.kill('SIGKILL');
         if (session.timeout)
             clearTimeout(session.timeout);
+        if (session.watchdogTimer)
+            clearInterval(session.watchdogTimer);
         this.activeSessions.delete(sessionID);
     }
     stopAllStreams() {

@@ -18,7 +18,8 @@ export declare class DahuaDiscovery {
     private readonly username;
     private readonly password;
     private readonly log;
-    constructor(api: DahuaApi, host: string, port: number, secure: boolean, username: string, password: string, log: Logger);
+    private readonly rtspPort;
+    constructor(api: DahuaApi, host: string, port: number, secure: boolean, username: string, password: string, log: Logger, rtspPort?: number);
     /**
      * Get NVR device information
      */
@@ -49,13 +50,15 @@ export declare class DahuaDiscovery {
     /**
      * Build still image URL for a channel
      */
-    buildStillImageUrl(channelId: number, streamType?: StreamType): string;
+    buildStillImageUrl(channelId: number, _streamType?: StreamType): string;
     /**
      * Build FFmpeg source string for a channel
      */
     buildFfmpegSource(channelId: number, streamType?: StreamType): string;
     /**
      * Build FFmpeg still image source string for a channel
+     * @deprecated Snapshots should use DahuaApi.getSnapshot() for proper digest auth.
+     * This method is kept for backward compatibility with existing stored configs.
      */
-    buildFfmpegStillSource(channelId: number, streamType?: StreamType): string;
+    buildFfmpegStillSource(channelId: number, _streamType?: StreamType): string;
 }

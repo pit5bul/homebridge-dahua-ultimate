@@ -2,6 +2,60 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.1.0] - 2026-07-04
+
+This release reworks the streaming layer's internal architecture, following a direct,
+line-by-line comparison against homebridge-unifi-protect's real production source
+(protect-stream.ts, protect-camera.ts, and its shared homebridge-plugin-utils library).
+Existing configs continue to work unchanged — everything here is additive or internal.
+
+### Fixed
+- **Video never displayed despite FFmpeg reporting completely healthy output.** Root
+  cause was a combination of gaps found through this comparison, not any single flag:
+  no wall-clock keyframe guarantee (fixed in 2.0.11), missing `-profile:v`/`-level:v`
+  negotiation (fixed in 2.0.10), and a genuine port-mismatch bug where the RTCP port
+  advertised to HomeKit never matched what FFmpeg actually listened on (fixed in
+  2.0.12). This release adds the remaining architectural pieces on top of those fixes.
+- **`forceDiscovery: true` could get stuck in `config.json` permanently.** The reset to
+  `false` after a successful discovery was only ever applied in memory; the write to
+  disk only included the discovered `cameras` array, never the flag itself — meaning a
+  full re-discovery would silently re-run on every single restart, discarding whatever
+  had already been configured. The reset now happens before saving, and is actually
+  persisted to disk.
+- **`copyVideo`, `nativeWidth`, and `nativeHeight` were defined in the config schema but
+  never added to its `layout` array**, so despite being fully functional, valid config
+  options, no control for them ever rendered in the Homebridge Config UI.
+
+### Added
+- **Hardware acceleration is now verified before it's trusted, not just configured and
+  assumed.** Before a camera configured for `vaapi` is allowed to use it, a real test —
+  actual RTSP connect, actual hardware decode, actual `scale_vaapi`, actual hardware
+  encode, using that camera's own real source — runs once at platform startup (never
+  inside a live stream request, so it can never add latency to an actual viewing
+  attempt). If validation fails, that camera automatically and audibly falls back to
+  software encoding instead of failing silently deep inside a live session.
+- **`copyVideo` option**: for camera sources already in H.264 (set `codec: "h264"`),
+  stream copy relays the exact original bytes with no decode, no encode, no GPU, and
+  none of the failure modes either one carries. Not appropriate for every source — see
+  README for when to use it and when full transcoding is actually more reliable.
+- **`nativeWidth`/`nativeHeight` option**: caps the resolutions offered to HomeKit to
+  what a camera can actually deliver, rather than always declaring a fixed list
+  regardless of the source's real capability.
+- **Stream failures are now handled honestly.** When the stall watchdog detects a
+  frozen pipeline, it now calls the official, public
+  `CameraController.forceStopStreamingSession()` API and lets HomeKit's own
+  reconnection logic establish a completely fresh session — new ports, new SRTP keys,
+  everything — instead of silently killing and respawning FFmpeg in place behind
+  HomeKit's back while reusing a session HomeKit still believes is healthy.
+
+### Changed
+- FFmpeg command construction rewritten from a single large template string (built via
+  deeply nested conditional expressions, then split on whitespace) to a plain typed
+  array, one argument pushed at a time. This is what actually made the RTCP port
+  mismatch bug (2.0.12) and the VAAPI-fallback filter mismatch bug (found and fixed
+  during this rework's own testing) possible to find and fix with confidence — every
+  argument is now individually inspectable rather than buried in string concatenation.
+
 ## [2.0.12] - 2026-07-04
 
 ### Fixed

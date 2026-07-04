@@ -77,6 +77,12 @@ On first startup the plugin will auto-discover all cameras and populate the conf
 | `hwaccelDevice` | string | `/dev/dri/renderD128` | Hardware device path |
 | `audio` | boolean | true | Enable audio |
 | `copyAudio` | boolean | false | Pass audio through without transcoding |
+| `copyVideo` | boolean | false | Pass video through without transcoding — only takes effect when `codec` is set to `h264` (the source must already be H.264). See "Copy Video" below. |
+| `nativeWidth` | number | — | This channel's real native resolution width, if known. Caps what's offered to HomeKit — never declares a resolution larger than this. |
+| `nativeHeight` | number | — | This channel's real native resolution height, if known. |
+| `forceKeyFrameInterval` | number | 4 | Maximum seconds between keyframes, regardless of encoding fps. HomeKit's own tolerance is documented at ~5 seconds. |
+| `stallWatchdog` | boolean | true | Detect a frozen video pipeline and end the session cleanly (letting HomeKit reconnect) rather than leaving a dead stream running. |
+| `stallTimeoutMs` | number | 4000 | How long the frame counter must be frozen before the stall watchdog acts. |
 | `recording` | boolean | false | Enable HKSV recording |
 | `prebuffer` | boolean | false | Enable HKSV prebuffer |
 | `codec` | string | — | `h264` or `h265` — set this to your camera's actual RTSP codec for fast, reliable stream startup. See below. |
@@ -84,6 +90,42 @@ On first startup the plugin will auto-discover all cameras and populate the conf
 | `probeSize` | number | auto | Bytes FFmpeg reads to detect stream params. Overrides the `codec` default if set. H.265: `32`, H.264: `500000`. |
 | `analyzeDuration` | number | auto | Microseconds FFmpeg analyses the stream. Overrides the `codec` default if set. H.265: `0`, H.264: `1000000`. |
 | `debug` | boolean | false | Verbose FFmpeg logging |
+
+## Copy Video (no transcoding)
+
+If a camera's source is already H.264 (set `codec: "h264"`), you can skip decoding and
+re-encoding entirely:
+
+```json
+{
+  "codec": "h264",
+  "copyVideo": true
+}
+```
+
+This relays the exact original bytes — no decode, no encode, no GPU or CPU cost beyond
+relaying packets, and much faster stream startup. It cannot resize the video, so only
+use it when the source resolution is already what you want HomeKit to receive.
+
+**This isn't automatically the better choice for every H.264 source.** If a camera's
+own bitstream has non-standard characteristics (some ONVIF/third-party cameras patched
+into an NVR do), stream copy relays those quirks unchanged and can be less reliable
+than a full transcode — which decodes through FFmpeg's own decoder and re-encodes a
+clean, standards-compliant bitstream from scratch, effectively fixing the source's
+quirks in the process. If `copyVideo` is unreliable on a specific camera, try turning
+it off for that camera and leaving full transcoding on instead — test both and use
+whichever is actually more reliable for that specific source.
+
+## Hardware Acceleration Validation
+
+When `encoder` is set to `vaapi`, this plugin verifies it actually works before trusting
+it — a real test using that camera's own RTSP source (real decode, real scale, real
+encode) runs once at platform startup, before any camera accessory exists and before any
+stream can be requested. If the test fails, that camera automatically falls back to
+software encoding, with a clear log message explaining why. This exists because
+`-hwaccels` reporting a method as available only means the FFmpeg build supports it —
+it says nothing about whether the actual GPU driver stack will reliably work with it in
+practice.
 
 ## Frame Rate
 

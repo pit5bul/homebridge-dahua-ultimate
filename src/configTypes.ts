@@ -109,6 +109,14 @@ export interface VideoConfig {
   audio?: boolean;
   copyAudio?: boolean;
 
+  // Avoid transcoding entirely when the source already satisfies HomeKit's
+  // requirements. Only takes effect when codec is explicitly set to 'h264' (i.e. the
+  // camera's source is confirmed already H.264, not H.265) — stream copy relays the
+  // exact original bytes with no decode/encode/GPU involvement at all, but cannot
+  // resize, so only use this when the source resolution is already what HomeKit
+  // should receive.
+  copyVideo?: boolean;
+
   // Filters
   videoFilter?: string;
   vflip?: boolean;
@@ -128,6 +136,13 @@ export interface VideoConfig {
   // cameras, regardless of retries. When false, snapshots are grabbed via
   // FFmpeg from the RTSP `source` instead. Defaults to true (use snapshot.cgi).
   nativeSnapshot?: boolean;
+
+  // The camera channel's real native resolution, if known. When set, HomeKit is
+  // never offered a resolution larger than this — declaring resolutions the source
+  // can't actually deliver serves no one. Optional; omit if unknown, in which case
+  // the full standard resolution list is declared as before.
+  nativeWidth?: number;
+  nativeHeight?: number;
 
   // Stall watchdog: detects a frozen FFmpeg output (e.g. VAAPI/GPU driver hangs — a
   // known class of bug in FFmpeg+Mesa+radeonsi, reproducible even outside this plugin)

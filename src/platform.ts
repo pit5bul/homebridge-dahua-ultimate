@@ -160,13 +160,19 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
         const discoveredChannels = await this.discovery.discoverChannels();
         this.log.info(`✅ Found ${discoveredChannels.length} channel(s) on NVR`);
         cameras = await this.mergeDiscoveredCameras(cameras, discoveredChannels);
-        await this.saveConfig(cameras);
-        
+
+        // Reset forceDiscovery in memory BEFORE saving, so saveConfig can persist the
+        // reset to disk in the same write. Previously this was reset only in memory,
+        // AFTER saveConfig had already run — meaning forceDiscovery:true stayed stuck
+        // in config.json permanently, forcing a full re-discovery on every single
+        // restart forever, silently discarding whatever was just saved.
         if (this.platformConfig.forceDiscovery) {
           this.platformConfig.forceDiscovery = false;
           this.log.info('✅ Discovery complete. forceDiscovery has been reset to false.');
         }
-        
+
+        await this.saveConfig(cameras);
+
         // Show helpful message on first discovery
         if (originalCount === 0 && cameras.length > 0) {
           this.log.info('🎉 First-time setup complete!');
@@ -497,6 +503,11 @@ export class DahuaPlatform implements DynamicPlatformPlugin {
         if (platformIndex !== -1) {
           // Update cameras while preserving other settings
           config.platforms[platformIndex].cameras = cameras;
+          // Also persist forceDiscovery's current in-memory value — previously only
+          // cameras was written here, so a forceDiscovery:true reset (see above) never
+          // reached disk, leaving it stuck true forever and forcing re-discovery on
+          // every single restart regardless of what had already been saved.
+          config.platforms[platformIndex].forceDiscovery = this.platformConfig.forceDiscovery ?? false;
           
           // Write back to file
           await fs.promises.writeFile(

@@ -60,6 +60,7 @@ export const DEFAULT_VIDEO_CONFIG = {
   encoder: 'software' as const,
   audio: true,
   copyAudio: false,
+  copyVideo: false,
   packetSize: 1316,
   debug: false,
   debugReturn: false,
@@ -112,13 +113,15 @@ export const MOTION_EVENT_TYPES = [
  * Detects a frozen FFmpeg video pipeline — observed in the wild as a reproducible
  * FFmpeg+VAAPI+Mesa/radeonsi driver-level hang (confirmed independent of this plugin:
  * reproduces in a bare `ffmpeg` process with no network output and no HomeKit
- * involved) — and force-restarts FFmpeg before HomeKit's own stream-start patience
- * window runs out. HomeKit's live-view player does not reliably self-recover from an
- * interruption during stream startup, so a fast, silent restart here is the
- * difference between a viewer never noticing and a permanent black screen.
+ * involved) — and honestly terminates the HAP session via
+ * CameraController.forceStopStreamingSession(), letting HomeKit's own reconnection
+ * logic establish a fresh session. Earlier versions of this plugin silently killed
+ * and respawned FFmpeg in place, reusing the same session HomeKit still believed was
+ * healthy — comparison against homebridge-unifi-protect's own FfmpegStreamingProcess
+ * showed that failing honestly, rather than patching around a failure HomeKit doesn't
+ * know about, is the more reliable design.
  */
 export const DEFAULT_STALL_TIMEOUT_MS = 4000;
-export const MAX_STALL_RESTARTS = 3;
 export const STALL_CHECK_INTERVAL_MS = 1000;
 
 /**

@@ -144,11 +144,16 @@ class DahuaPlatform {
                 const discoveredChannels = await this.discovery.discoverChannels();
                 this.log.info(`✅ Found ${discoveredChannels.length} channel(s) on NVR`);
                 cameras = await this.mergeDiscoveredCameras(cameras, discoveredChannels);
-                await this.saveConfig(cameras);
+                // Reset forceDiscovery in memory BEFORE saving, so saveConfig can persist the
+                // reset to disk in the same write. Previously this was reset only in memory,
+                // AFTER saveConfig had already run — meaning forceDiscovery:true stayed stuck
+                // in config.json permanently, forcing a full re-discovery on every single
+                // restart forever, silently discarding whatever was just saved.
                 if (this.platformConfig.forceDiscovery) {
                     this.platformConfig.forceDiscovery = false;
                     this.log.info('✅ Discovery complete. forceDiscovery has been reset to false.');
                 }
+                await this.saveConfig(cameras);
                 // Show helpful message on first discovery
                 if (originalCount === 0 && cameras.length > 0) {
                     this.log.info('🎉 First-time setup complete!');
@@ -254,7 +259,7 @@ class DahuaPlatform {
             motion: settings_1.DEFAULT_CAMERA_CONFIG.motion,
             motionTimeout: settings_1.DEFAULT_CAMERA_CONFIG.motionTimeout,
             unbridge: settings_1.DEFAULT_CAMERA_CONFIG.unbridge,
-            enabled: enabled, // Use the passed enabled flag from discovery
+            enabled: enabled,
             videoConfig: {
                 source,
                 stillImageSource,
@@ -322,37 +327,17 @@ class DahuaPlatform {
                 ...settings_1.DEFAULT_VIDEO_CONFIG,
                 ...(camera.videoConfig || {}),
             };
-            // Determine encoder type - support both new 'encoder' field and legacy 'vcodec' field
-            let encoderType;
-            let vcodec;
-            if (camera.videoConfig.encoder) {
-                // New way: use encoder field directly
-                encoderType = camera.videoConfig.encoder;
-                // vcodec will be auto-derived in delegate.ts
-            }
-            else if (camera.videoConfig.vcodec) {
-                // Legacy way: map vcodec to encoder type
-                vcodec = camera.videoConfig.vcodec;
-                const codecToEncoder = {
-                    'libx264': 'software',
-                    'h264_nvenc': 'nvenc',
-                    'h264_qsv': 'quicksync',
-                    'h264_vaapi': 'vaapi',
-                    'h264_amf': 'amf',
-                    'h264_videotoolbox': 'videotoolbox',
-                    'h264_v4l2m2m': 'v4l2',
-                };
-                encoderType = codecToEncoder[vcodec] || 'software';
-                camera.videoConfig.encoder = encoderType;
-            }
-            else {
-                // Default to software
-                encoderType = 'software';
-                camera.videoConfig.encoder = encoderType;
-            }
-            // No longer using ENCODER_PRESETS - delegate.ts auto-configures everything
-            // Just log what encoder type is being used
+            // Resolve encoder type
+            const encoderType = camera.videoConfig.encoder || 'software';
+            camera.videoConfig.encoder = encoderType;
             this.log.info(`Camera ${camera.name} using ${encoderType} encoder`);
+            // Resolve qualityPreset → maxWidth / maxHeight / maxBitrate
+            const preset = camera.videoConfig.qualityPreset || settings_1.DEFAULT_QUALITY_PRESET;
+            const presetValues = settings_1.QUALITY_PRESETS[preset] || settings_1.QUALITY_PRESETS[settings_1.DEFAULT_QUALITY_PRESET];
+            camera.videoConfig.maxWidth = presetValues.maxWidth;
+            camera.videoConfig.maxHeight = presetValues.maxHeight;
+            camera.videoConfig.maxBitrate = presetValues.maxBitrate;
+            this.log.info(`Camera ${camera.name} quality: ${preset} (${presetValues.maxWidth}x${presetValues.maxHeight} @ ${presetValues.maxBitrate}kbps)`);
             // Only set source if not already set
             if (!camera.videoConfig.source) {
                 camera.videoConfig.source = this.discovery.buildFfmpegSource(camera.channelId, streamType);
@@ -363,10 +348,15 @@ class DahuaPlatform {
                 camera.videoConfig.stillImageSource = this.discovery.buildFfmpegStillSource(camera.channelId, streamType);
                 this.log.info(`Generated snapshot source for ${camera.name}: ${camera.videoConfig.stillImageSource}`);
             }
-            // Log applied configuration for debugging
-            this.log.info(`Camera ${camera.name} config: ${camera.videoConfig.maxWidth}x${camera.videoConfig.maxHeight}, ${camera.videoConfig.maxBitrate}kbps`);
         }
-        const cameraAccessory = new camera_1.CameraAccessory(this.api, accessory, camera, this.ffmpegPath, this.log);
+        // Each camera gets its own DahuaApi instance for snapshots, rather than sharing
+        // this.api_client. Digest auth state (nonce/nc) is mutable and per-instance; sharing
+        // one client across cameras meant concurrent snapshot requests (HomeKit fetches
+        // several cameras' thumbnails in parallel) could interleave and corrupt each other's
+        // nonce, producing intermittent 400/500 responses from the NVR. The shared client
+        // is still used for discovery and the motion event stream, which are not concurrent.
+        const cameraApiClient = new api_1.DahuaApi(this.platformConfig.host, this.platformConfig.port || settings_1.DEFAULT_PLATFORM_CONFIG.port, this.platformConfig.secure || settings_1.DEFAULT_PLATFORM_CONFIG.secure, this.platformConfig.username, this.platformConfig.password, this.log);
+        const cameraAccessory = new camera_1.CameraAccessory(this.api, accessory, camera, this.ffmpegPath, this.log, cameraApiClient);
         this.cameraAccessories.set(camera.channelId, cameraAccessory);
         if (isNew) {
             this.log.info(`Registering new accessory: ${camera.name}`);
@@ -433,6 +423,11 @@ class DahuaPlatform {
                 if (platformIndex !== -1) {
                     // Update cameras while preserving other settings
                     config.platforms[platformIndex].cameras = cameras;
+                    // Also persist forceDiscovery's current in-memory value — previously only
+                    // cameras was written here, so a forceDiscovery:true reset (see above) never
+                    // reached disk, leaving it stuck true forever and forcing re-discovery on
+                    // every single restart regardless of what had already been saved.
+                    config.platforms[platformIndex].forceDiscovery = this.platformConfig.forceDiscovery ?? false;
                     // Write back to file
                     await fs.promises.writeFile(configPath, JSON.stringify(config, null, 4), 'utf8');
                     this.log.info(`✅ Saved ${cameras.length} camera(s) to config.json`);

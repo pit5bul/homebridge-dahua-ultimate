@@ -19,7 +19,7 @@ class RecordingDelegate {
     currentRecordingConfiguration;
     activeFFmpegProcesses = new Map();
     streamAbortControllers = new Map();
-    constructor(log, cameraName, videoConfig, api, _hap, videoProcessor) {
+    constructor(log, cameraName, videoConfig, api, videoProcessor) {
         this.log = log;
         this.cameraName = cameraName;
         this.videoConfig = videoConfig;

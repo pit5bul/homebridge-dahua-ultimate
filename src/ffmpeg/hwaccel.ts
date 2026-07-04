@@ -1,0 +1,112 @@
+import { spawn } from 'child_process';
+import { Logger } from 'homebridge';
+
+/**
+ * Hardware acceleration validation.
+ *
+ * Architectural principle (learned by direct comparison with homebridge-unifi-protect's
+ * FfmpegCodecs class): never trust that a hardware acceleration method will work just
+ * because it's configured, or even because FFmpeg's own `-hwaccels` list reports it as
+ * available. Actually run a small, real test encode using it, and only treat it as usable
+ * if that test genuinely succeeds. If it fails, fall back to software automatically and
+ * say so clearly — don't discover the failure five layers into a live stream attempt.
+ *
+ * This directly targets a confirmed, real, reproducible VAAPI/Mesa/radeonsi driver-level
+ * hang on some hardware (verified independent of this plugin, in a bare `ffmpeg` process).
+ * `-hwaccels` reporting "vaapi" tells you the capability exists in the FFmpeg build; it
+ * says nothing about whether the actual GPU/driver stack will reliably encode with it.
+ *
+ * Results are cached per (videoProcessor, device) pair for the lifetime of the process —
+ * we validate once, not on every single stream start.
+ */
+
+interface ValidationResult {
+  valid: boolean;
+  checkedAt: number;
+}
+
+const validationCache = new Map<string, ValidationResult>();
+
+function cacheKey(videoProcessor: string, device: string): string {
+  return `${videoProcessor}::${device}`;
+}
+
+/**
+ * Runs a short, real VAAPI encode test against the given device. Returns true only if
+ * the test actually succeeds — mirrors HBUP's `probeFfmpegHwAccel` validation step.
+ */
+function runVaapiTest(videoProcessor: string, device: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const args = [
+      '-hide_banner', '-loglevel', 'error',
+      '-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi',
+      '-f', 'lavfi', '-i', 'color=black:size=1280x720:rate=5',
+      '-t', '1',
+      '-vf', 'format=nv12,hwupload',
+      '-c:v', 'h264_vaapi',
+      '-f', 'null', '-',
+    ];
+
+    const proc = spawn(videoProcessor, args, { env: process.env });
+    let settled = false;
+
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    // Defensive timeout — a hung validation test shouldn't be able to block startup
+    // indefinitely. If it hasn't finished in 8s, treat it as a failed validation.
+    const timeout = setTimeout(() => {
+      proc.kill('SIGKILL');
+      finish(false);
+    }, 8000);
+
+    proc.on('error', () => {
+      clearTimeout(timeout);
+      finish(false);
+    });
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      finish(code === 0);
+    });
+  });
+}
+
+/**
+ * Validates VAAPI hardware acceleration for a specific device, using a cached result if
+ * we've already checked this (videoProcessor, device) pair during this process's lifetime.
+ */
+export async function validateVaapi(videoProcessor: string, device: string, log: Logger, cameraName: string): Promise<boolean> {
+  const key = cacheKey(videoProcessor, device);
+  const cached = validationCache.get(key);
+  if (cached) return cached.valid;
+
+  log.info(`Validating VAAPI hardware acceleration on ${device} before trusting it for streaming...`, cameraName);
+  const valid = await runVaapiTest(videoProcessor, device);
+
+  validationCache.set(key, { valid, checkedAt: Date.now() });
+
+  if (valid) {
+    log.info(`✅ VAAPI validated on ${device} — hardware acceleration available`, cameraName);
+  } else {
+    log.warn(
+      `⚠️ VAAPI validation FAILED on ${device} — this is a known class of driver-level issue ` +
+      `(confirmed reproducible independent of this plugin on some hardware). Falling back to ` +
+      'software encoding for any camera configured to use this device.',
+      cameraName,
+    );
+  }
+
+  return valid;
+}
+
+/**
+ * Clears the validation cache. Exposed for testing; not used in normal operation since
+ * validation results are intentionally sticky for the process lifetime.
+ */
+export function clearVaapiValidationCache(): void {
+  validationCache.clear();
+}
