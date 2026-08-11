@@ -504,7 +504,12 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
     if (encoder === 'vaapi' && !canCopy) {
       const hwDevice = this.videoConfig.hwaccelDevice || '/dev/dri/renderD128';
-      args.push('-hwaccel', 'vaapi', '-hwaccel_device', hwDevice, '-hwaccel_output_format', 'vaapi');
+      // -hwaccel_device alone does not reliably attach a hardware device reference to
+      // the filter graph on every FFmpeg build — scale_vaapi then fails the same way
+      // hwupload does in the validation test (see ../ffmpeg/hwaccel.ts). Explicitly
+      // creating a named device via -init_hw_device and referencing it by name fixes
+      // this, matching the pattern already used below for quicksync/nvenc.
+      args.push('-init_hw_device', `vaapi=va:${hwDevice}`, '-hwaccel', 'vaapi', '-hwaccel_device', 'va', '-hwaccel_output_format', 'vaapi');
     } else if (encoder === 'quicksync' && !canCopy) {
       args.push('-init_hw_device', 'qsv=hw');
     } else if (encoder === 'nvenc' && !canCopy) {
@@ -619,7 +624,13 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       if (qualityProfile === 'speed') return { encoderOptions: ['-quality', '1'], gopSize: 25, bframes: 0 };
       if (qualityProfile === 'quality') return { encoderOptions: ['-quality', '7'], gopSize: 13, bframes: 2 };
       if (qualityProfile === 'balanced') return { encoderOptions: ['-quality', '4'], gopSize: 19, bframes: 0 };
-      return { encoderOptions: [], gopSize: 0, bframes: -1 };
+      // Default (no qualityProfile set): bframes must be 0, not -1 (which skips -bf entirely and lets
+      // the VAAPI encoder fall back to its own default). Verified on real hardware that this default
+      // is heavy B-frame usage (more B-frames than P-frames in one test) — fine for a file on disk,
+      // fatal for real-time RTP/HomeKit streaming, where B-frames force the decoder to buffer and
+      // reorder around future frames it may never receive in time, stalling playback until the next
+      // keyframe. This is what caused "1 frame every ~4s" (the forced keyframe interval) in practice.
+      return { encoderOptions: [], gopSize: 0, bframes: 0 };
     }
 
     if (vcodec === 'h264_amf') {
