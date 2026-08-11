@@ -2,6 +2,40 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.1.1] - 2026-08-11
+
+Two VAAPI hardware-acceleration bugs, both found and fixed against real hardware
+(AMD Radeon 680M, custom-compiled static FFmpeg 8.0.1) during a real deployment.
+
+### Fixed
+- **VAAPI validation and streaming failed with "A hardware device reference is required
+  to upload frames to."** `-hwaccel_device <path>` alone does not reliably attach a
+  hardware device reference to the filter graph on every FFmpeg build — `hwupload` and
+  `scale_vaapi` then fail immediately. Fixed by explicitly creating a named device via
+  `-init_hw_device vaapi=va:<device>` and referencing it by name (`-hwaccel_device va`,
+  `-filter_hw_device va`), matching the pattern this plugin already used for
+  `quicksync`/`nvenc`. Confirmed against real hardware: both the validation test and a
+  full real-camera H.265 decode → GPU scale → H.264 encode pipeline now succeed where
+  they previously failed at the `hwupload`/`scale_vaapi` stage.
+- **VAAPI streaming appeared to freeze, updating only once per forced keyframe interval**
+  (e.g. once every 4 seconds with the default `forceKeyFrameInterval`). Root cause:
+  `getEncoderOptions()`'s default branch for `h264_vaapi` (used whenever `qualityProfile`
+  isn't set) passed `bframes: -1`, which skips the `-bf` flag entirely and lets the VAAPI
+  encoder fall back to its own default — confirmed on real hardware to be heavy B-frame
+  usage (47 B-frames out of 73 total frames in one test, more B-frames than P-frames).
+  B-frames require the decoder to buffer and reorder around future frames, which is
+  fundamentally incompatible with real-time RTP/HomeKit streaming: if the reference chain
+  doesn't arrive in time, playback stalls until the next keyframe. Fixed by defaulting to
+  `bframes: 0` for this case, matching the same clean I/P frame structure the `speed` and
+  `balanced` quality profiles already used. Confirmed on real hardware: the same camera
+  stream went from 47 B-frames (choppy) to zero B-frames (smooth) with this change.
+
+Note: the same `bframes: -1` default pattern also exists for `amf`, `qsv`, and `nvenc` in
+this file. It was **not** changed here — their actual B-frame behavior on real hardware
+hasn't been verified the way `vaapi`'s was in this release, and changing behavior that
+hasn't been confirmed broken isn't warranted. Worth checking if those encoders are in
+active use.
+
 ## [2.1.0] - 2026-07-04
 
 This release reworks the streaming layer's internal architecture, following a direct,

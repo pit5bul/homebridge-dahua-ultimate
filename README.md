@@ -127,6 +127,16 @@ software encoding, with a clear log message explaining why. This exists because
 it says nothing about whether the actual GPU driver stack will reliably work with it in
 practice.
 
+**VAAPI specifically** (as of 2.1.1) always creates an explicit named hardware device via
+`-init_hw_device` rather than relying on `-hwaccel_device` alone — some FFmpeg builds
+don't reliably attach a device reference to the filter graph without it, which surfaces
+as `hwupload`/`scale_vaapi` failing with "A hardware device reference is required to
+upload frames to." VAAPI streaming also always disables B-frames by default (`-bf 0`)
+unless a `qualityProfile` explicitly requests otherwise — B-frames require the decoder to
+buffer and reorder around future frames, which real-time RTP/HomeKit streaming can't
+tolerate reliably, and previously showed up as video that appeared to update only once
+per forced keyframe interval instead of playing smoothly.
+
 ## Frame Rate
 
 Dahua NVRs typically output 15fps. The `maxFPS` option (default `15`) tells HomeKit the maximum frame rate this camera supports. Setting this correctly prevents HomeKit from requesting 30fps and then buffering duplicate frames before rendering — which caused slow stream startup in earlier versions.
