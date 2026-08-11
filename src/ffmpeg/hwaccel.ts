@@ -37,9 +37,15 @@ function cacheKey(videoProcessor: string, device: string): string {
  */
 function runVaapiTest(videoProcessor: string, device: string): Promise<boolean> {
   return new Promise((resolve) => {
+    // -hwaccel_device alone does not attach a hardware device reference to the filter
+    // graph on every FFmpeg build (confirmed on a custom-compiled static FFmpeg 8.0.1) —
+    // the hwupload filter then fails with "A hardware device reference is required to
+    // upload frames to." Explicitly creating a named device via -init_hw_device and
+    // pointing the filter chain at it with -filter_hw_device fixes this reliably and is
+    // harmless on builds where the implicit path already worked.
     const args = [
       '-hide_banner', '-loglevel', 'error',
-      '-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi',
+      '-init_hw_device', `vaapi=va:${device}`, '-filter_hw_device', 'va',
       '-f', 'lavfi', '-i', 'color=black:size=1280x720:rate=5',
       '-t', '1',
       '-vf', 'format=nv12,hwupload',

@@ -404,7 +404,12 @@ class StreamingDelegate {
         const mtu = this.videoConfig.packetSize || 1316;
         if (encoder === 'vaapi' && !canCopy) {
             const hwDevice = this.videoConfig.hwaccelDevice || '/dev/dri/renderD128';
-            args.push('-hwaccel', 'vaapi', '-hwaccel_device', hwDevice, '-hwaccel_output_format', 'vaapi');
+            // -hwaccel_device alone does not reliably attach a hardware device reference to
+            // the filter graph on every FFmpeg build — scale_vaapi then fails the same way
+            // hwupload does in the validation test (see ../ffmpeg/hwaccel.ts). Explicitly
+            // creating a named device via -init_hw_device and referencing it by name fixes
+            // this, matching the pattern already used below for quicksync/nvenc.
+            args.push('-init_hw_device', `vaapi=va:${hwDevice}`, '-hwaccel', 'vaapi', '-hwaccel_device', 'va', '-hwaccel_output_format', 'vaapi');
         }
         else if (encoder === 'quicksync' && !canCopy) {
             args.push('-init_hw_device', 'qsv=hw');
