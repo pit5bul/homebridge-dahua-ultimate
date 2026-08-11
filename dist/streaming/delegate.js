@@ -522,7 +522,13 @@ class StreamingDelegate {
                 return { encoderOptions: ['-quality', '7'], gopSize: 13, bframes: 2 };
             if (qualityProfile === 'balanced')
                 return { encoderOptions: ['-quality', '4'], gopSize: 19, bframes: 0 };
-            return { encoderOptions: [], gopSize: 0, bframes: -1 };
+            // Default (no qualityProfile set): bframes must be 0, not -1 (which skips -bf entirely and lets
+            // the VAAPI encoder fall back to its own default). Verified on real hardware that this default
+            // is heavy B-frame usage (more B-frames than P-frames in one test) — fine for a file on disk,
+            // fatal for real-time RTP/HomeKit streaming, where B-frames force the decoder to buffer and
+            // reorder around future frames it may never receive in time, stalling playback until the next
+            // keyframe. This is what caused "1 frame every ~4s" (the forced keyframe interval) in practice.
+            return { encoderOptions: [], gopSize: 0, bframes: 0 };
         }
         if (vcodec === 'h264_amf') {
             if (qualityProfile === 'speed')
