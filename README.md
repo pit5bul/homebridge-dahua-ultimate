@@ -6,8 +6,6 @@
 
 Homebridge plugin for Dahua NVR cameras with automatic discovery, motion detection, and hardware-accelerated streaming.
 
-> **v2.0.3** — Snapshots now use direct HTTP digest auth — no FFmpeg, no timeouts. Multiple bug fixes across streaming, events and config.
-
 ## Features
 
 - **Automatic camera discovery** — connects to your Dahua NVR and discovers all cameras automatically
