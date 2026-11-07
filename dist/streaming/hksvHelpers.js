@@ -57,9 +57,11 @@ async function readLength(readable, length) {
         const cleanup = () => {
             readable.removeListener('readable', r);
             readable.removeListener('end', e);
+            readable.removeListener('close', e);
         };
         readable.on('readable', r);
         readable.on('end', e);
+        readable.on('close', e);
     });
 }
 /**

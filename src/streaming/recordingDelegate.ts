@@ -25,7 +25,18 @@ export class RecordingDelegate implements CameraRecordingDelegate {
   private readonly cameraName: string;
   private readonly videoConfig: VideoConfig;
   private readonly videoProcessor: string;
-  private process?: ChildProcess;
+  // Processes we have deliberately stopped (so the MP4 generator ends quietly)
+  private readonly intentionallyKilled = new WeakSet<ChildProcess>();
+  // In-flight terminations, so repeated calls for one process share a single kill sequence
+  private readonly terminating = new WeakMap<ChildProcess, Promise<void>>();
+  // Every FFmpeg we spawned that has not exited yet (the source of truth for cleanup)
+  private readonly liveProcesses = new Set<ChildProcess>();
+
+  private static readonly KILL_ESCALATION_MS = 2000;
+  // No MP4 data from FFmpeg for this long = stalled source; stop it
+  private static readonly STALL_TIMEOUT_MS = 15000;
+  // RTSP socket I/O timeout, in microseconds (FFmpeg -timeout)
+  private static readonly RTSP_IO_TIMEOUT_US = '10000000';
 
   private preBufferSession?: Mp4Session;
   private preBuffer?: PreBuffer;
@@ -53,15 +64,60 @@ export class RecordingDelegate implements CameraRecordingDelegate {
         this.preBufferSession.server?.close();
       }
 
-      this.activeFFmpegProcesses.forEach((process, streamId) => {
-        if (!process.killed) {
-          this.log.debug(`[HKSV] Shutdown: Terminating FFmpeg for stream ${streamId}`, this.cameraName);
-          process.kill('SIGTERM');
-        }
+      this.liveProcesses.forEach((cp) => {
+        this.log.debug(`[HKSV] Shutdown: Terminating FFmpeg PID ${cp.pid}`, this.cameraName);
+        void this.terminateProcess(cp);
       });
       this.activeFFmpegProcesses.clear();
       this.streamAbortControllers.clear();
     });
+  }
+
+  /**
+   * True once the OS process has really exited.
+   * NOTE: ChildProcess.killed only means "a signal was sent", never "it exited".
+   */
+  private hasExited(cp: ChildProcess): boolean {
+    return cp.exitCode !== null || cp.signalCode !== null;
+  }
+
+  /**
+   * Stop an FFmpeg process and make sure it is really gone.
+   * 1. Close our end of the stdout pipe. FFmpeg blocks writing to a full pipe nobody reads
+   *    and does not react to SIGTERM in that state; a closed pipe makes the write fail (EPIPE).
+   * 2. Send SIGTERM.
+   * 3. If it has not exited after KILL_ESCALATION_MS, send SIGKILL.
+   * Idempotent. Resolves when the process has exited.
+   */
+  private terminateProcess(cp: ChildProcess): Promise<void> {
+    if (this.hasExited(cp)) {
+      return Promise.resolve();
+    }
+    const inFlight = this.terminating.get(cp);
+    if (inFlight) {
+      return inFlight;
+    }
+    this.intentionallyKilled.add(cp);
+
+    const done = new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.hasExited(cp)) {
+          this.log.warn(`[HKSV] FFmpeg PID ${cp.pid} ignored SIGTERM, sending SIGKILL`, this.cameraName);
+          cp.kill('SIGKILL');
+        }
+      }, RecordingDelegate.KILL_ESCALATION_MS);
+
+      cp.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+
+      cp.stdout?.destroy();
+      cp.stdin?.destroy();
+      cp.kill('SIGTERM');
+    });
+    this.terminating.set(cp, done);
+    return done;
   }
 
   /**
@@ -202,11 +258,10 @@ export class RecordingDelegate implements CameraRecordingDelegate {
     }
 
     // Kill FFmpeg process
-    const process = this.activeFFmpegProcesses.get(streamId);
-    if (process && !process.killed) {
+    const cp = this.activeFFmpegProcesses.get(streamId);
+    if (cp) {
       this.log.debug(`[HKSV] Terminating FFmpeg process for stream ${streamId}`, this.cameraName);
-      process.kill('SIGTERM');
-      this.activeFFmpegProcesses.delete(streamId);
+      void this.terminateProcess(cp);
     }
   }
 
@@ -313,6 +368,13 @@ export class RecordingDelegate implements CameraRecordingDelegate {
       ffmpegInput.push(...this.videoConfig.source.trim().split(/\s+/).filter((arg) => arg.length > 0));
     }
 
+    // A dead RTSP connection must make FFmpeg exit by itself instead of waiting forever
+    const inputIdx = ffmpegInput.indexOf('-i');
+    const hasTimeout = ffmpegInput.includes('-timeout') || ffmpegInput.includes('-stimeout');
+    if (inputIdx !== -1 && !hasTimeout && /^rtsps?:\/\//i.test(ffmpegInput[inputIdx + 1] ?? '')) {
+      ffmpegInput.splice(inputIdx, 0, '-timeout', RecordingDelegate.RTSP_IO_TIMEOUT_US);
+    }
+
     if (ffmpegInput.length === 0) {
       throw new Error('No video source configured for recording');
     }
@@ -327,6 +389,13 @@ export class RecordingDelegate implements CameraRecordingDelegate {
       cp = session.cp;
       generator = session.generator;
 
+      const previous = this.activeFFmpegProcesses.get(streamId);
+      if (previous && previous !== cp && !this.intentionallyKilled.has(previous)) {
+        this.log.warn(`[HKSV] Stream ${streamId} already had FFmpeg PID ${previous.pid}, terminating it`, this.cameraName);
+      }
+      if (previous && previous !== cp) {
+        void this.terminateProcess(previous);
+      }
       this.activeFFmpegProcesses.set(streamId, cp);
       this.log.debug(`[HKSV] FFmpeg process started for stream ${streamId}, PID: ${cp.pid}`, this.cameraName);
     } catch (error) {
@@ -337,8 +406,18 @@ export class RecordingDelegate implements CameraRecordingDelegate {
     let pending: Buffer[] = [];
     let isFirstFragment = true;
 
+    // Stall watchdog: works for any input, including ones FFmpeg's own timeout does not cover
+    let lastDataAt = Date.now();
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastDataAt > RecordingDelegate.STALL_TIMEOUT_MS) {
+        this.log.warn(`[HKSV] No data from FFmpeg PID ${cp.pid} for ${RecordingDelegate.STALL_TIMEOUT_MS / 1000}s, terminating`, this.cameraName);
+        void this.terminateProcess(cp);
+      }
+    }, 2000);
+
     try {
       for await (const box of generator) {
+        lastDataAt = Date.now();
         const { header, type, data } = box;
         pending.push(header, data);
 
@@ -366,15 +445,10 @@ export class RecordingDelegate implements CameraRecordingDelegate {
       this.log.debug(`[HKSV] Recording completed: ${e}`, this.cameraName);
     } finally {
       // Cleanup
-      if (cp && !cp.killed) {
-        cp.kill('SIGTERM');
-        setTimeout(() => {
-          if (!cp.killed) {
-            cp.kill('SIGKILL');
-          }
-        }, 2000);
+      clearInterval(watchdog);
+      if (cp) {
+        void this.terminateProcess(cp);
       }
-      this.activeFFmpegProcesses.delete(streamId);
     }
   }
 
@@ -401,18 +475,12 @@ export class RecordingDelegate implements CameraRecordingDelegate {
         'pipe:1',
       );
 
-      // Terminate any previous process
-      if (this.process && !this.process.killed) {
-        this.process.kill('SIGKILL');
-      }
-
-      this.process = spawn(ffmpegPath, args, {
+      const cp = spawn(ffmpegPath, args, {
         env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-
-      const cp = this.process;
-      let processKilledIntentionally = false;
+      this.liveProcesses.add(cp);
+      const wasKilledIntentionally = (): boolean => this.intentionallyKilled.has(cp);
 
       // MP4 generator
       async function* generator() {
@@ -431,7 +499,7 @@ export class RecordingDelegate implements CameraRecordingDelegate {
             const data = await readLength(cp.stdout, length);
             yield { header, length, type, data };
           } catch (error) {
-            if (!processKilledIntentionally) throw error;
+            if (!wasKilledIntentionally()) throw error;
             break;
           }
         }
@@ -441,7 +509,8 @@ export class RecordingDelegate implements CameraRecordingDelegate {
       if (cp.stderr) {
         cp.stderr.on('data', (data) => {
           const output = data.toString();
-          if (output.includes('error') || output.includes('Error')) {
+          // Errors during a deliberate shutdown (e.g. Broken pipe) are expected noise
+          if (!wasKilledIntentionally() && (output.includes('error') || output.includes('Error'))) {
             this.log.error(`[HKSV] FFmpeg: ${output.trim()}`, this.cameraName);
           }
         });
@@ -454,25 +523,16 @@ export class RecordingDelegate implements CameraRecordingDelegate {
       cp.on('error', reject);
 
       cp.on('exit', (code) => {
-        if (code !== 0 && !processKilledIntentionally && code !== 255) {
+        this.liveProcesses.delete(cp);
+        for (const [id, tracked] of this.activeFFmpegProcesses) {
+          if (tracked === cp) {
+            this.activeFFmpegProcesses.delete(id);
+          }
+        }
+        if (code !== 0 && !wasKilledIntentionally() && code !== 255) {
           this.log.warn(`[HKSV] FFmpeg exited with code ${code}`, this.cameraName);
         }
       });
-
-      // Cleanup handler
-      const cleanup = () => {
-        processKilledIntentionally = true;
-        if (cp && !cp.killed) {
-          cp.kill('SIGTERM');
-          setTimeout(() => {
-            if (!cp.killed) {
-              cp.kill('SIGKILL');
-            }
-          }, 2000);
-        }
-      };
-
-      (cp as any).cleanup = cleanup;
     });
   }
 }

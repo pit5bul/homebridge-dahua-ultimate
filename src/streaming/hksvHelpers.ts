@@ -70,10 +70,12 @@ export async function readLength(readable: Readable, length: number): Promise<Bu
     const cleanup = (): void => {
       readable.removeListener('readable', r);
       readable.removeListener('end', e);
+      readable.removeListener('close', e);
     };
 
     readable.on('readable', r);
     readable.on('end', e);
+    readable.on('close', e);
   });
 }
 
