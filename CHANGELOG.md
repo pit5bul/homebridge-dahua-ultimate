@@ -2,6 +2,58 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.1.2] - 2026-11-07
+
+HKSV recording leaked FFmpeg processes until Homebridge ran out of memory. Found on a
+512 MB LXC with HKSV enabled on one camera: Homebridge crashed after 1-2 hours, with
+recording FFmpeg processes (one 4.6 days old) still alive and holding about 480 MB
+between them (RSS plus swap).
+
+### Fixed
+- **Recording FFmpeg processes were not reliably stopped.** Root cause, reproduced against
+  real FFmpeg 6.1 and 8.0: when the HKSV consumer stops reading fragments, FFmpeg's stdout
+  pipe fills and FFmpeg blocks writing to it. In that state it ignores a single `SIGTERM`
+  and never exits; the plugin sent exactly one `SIGTERM` and then forgot the process.
+  Closing the reader end of the pipe makes FFmpeg exit immediately (the write fails with
+  EPIPE). `RecordingDelegate` now stops a recording FFmpeg by closing its stdout, sending
+  `SIGTERM`, and escalating to `SIGKILL` after 2 seconds if it has not exited. Exit is
+  tracked with the process `exit` event.
+- **The existing `SIGKILL` fallback could never run.** The old code checked
+  `!process.killed` before escalating, but `ChildProcess.killed` becomes `true` as soon as
+  a signal is *sent*, not when the process exits, so the escalation branch was dead code.
+- **Orphans after back-to-back recordings.** A single shared `this.process` slot was
+  overwritten by each new recording, and the previous process was only killed if no signal
+  had already been sent to it, so a process that had been signalled but was still alive was
+  lost. Every recording process is now tracked individually, and a new recording on the
+  same stream id terminates any process still registered for it.
+- **Shutdown** now stops all live recording processes with the same sequence instead of one
+  `SIGTERM`.
+
+### Added
+- **Stall watchdog for recording.** If a recording FFmpeg produces no data for 15 seconds
+  it is terminated, whatever the input. This covers an RTSP source that goes silent, which
+  FFmpeg's own timeout does not cover when `audio: false` adds the endless dummy audio
+  input.
+- **RTSP input timeout for recording.** `-timeout 10000000` (10 s) is added in front of an
+  `rtsp://` / `rtsps://` input if the source does not already set `-timeout`, so a stalled
+  connection makes FFmpeg exit by itself.
+
+### Changed
+- `readLength()` now also rejects when the stream emits `close`. A destroyed stream emits
+  `close`, not `end`, so a reader waiting on one would otherwise wait forever.
+- FFmpeg stderr lines such as `Broken pipe` are no longer logged as errors while a process
+  is being stopped on purpose.
+
+Tested with a harness that runs the old and new code side by side against real FFmpeg 8.0
+(consumer stops reading, 5 recordings in a row, an FFmpeg that ignores `SIGTERM`, shutdown,
+silent RTSP servers, and normal operation). The old code left FFmpeg processes running in
+each leak scenario; the new code left none, and normal recording produced the same fragments (count and sizes) as before.
+Live view (`delegate.ts`) is unchanged.
+
+Note: recording still encodes at the camera's source resolution with `libx264` (no scaling),
+so a single recording process on a high-resolution camera can use well over 100 MB. This
+release stops processes piling up; it does not reduce per-process memory.
+
 ## [2.1.1] - 2026-08-11
 
 Two VAAPI hardware-acceleration bugs, both found and fixed against real hardware

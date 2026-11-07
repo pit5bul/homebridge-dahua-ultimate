@@ -248,6 +248,11 @@ Enable `debug: true` in `videoConfig` and check Homebridge logs for FFmpeg error
 ### Snapshots failing
 Verify `port` and `secure` match your NVR. Snapshots now use direct digest auth HTTP — if a channel still fails, check the camera is online in the NVR web UI.
 
+### Homebridge runs out of memory with HKSV recording (FFmpeg processes pile up)
+Fixed in 2.1.2: earlier versions could leave recording FFmpeg processes running after a recording ended, and a few of them exhaust a small container. If you still see `ffmpeg` processes accumulating, check `ps` for processes older than a few minutes and look in the log for `ignored SIGTERM, sending SIGKILL` or `No data from FFmpeg ... terminating`, which show the new safety nets firing.
+
+HKSV recording encodes at the camera's source resolution, so each recording FFmpeg can use well over 100 MB on a high-resolution camera. For HKSV on such cameras, give the Homebridge host at least 1 GB of RAM.
+
 ### Hardware acceleration not working
 Verify your FFmpeg build includes the required encoder:
 ```bash
