@@ -23,6 +23,8 @@ sudo npm install -g homebridge-dahua-ultimate
 
 Or install via Homebridge Config UI X.
 
+**Requirements:** Node.js 18.17+, 20.9+, 22, 24 or 26, and Homebridge 1.6+ or 2.x.
+
 ## Minimum Configuration
 
 ```json
