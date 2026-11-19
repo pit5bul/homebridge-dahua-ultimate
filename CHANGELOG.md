@@ -2,6 +2,14 @@
 
 All notable changes to homebridge-dahua-ultimate will be documented in this file.
 
+## [2.1.3] - 2026-11-20
+
+### Changed
+- **Declared Node.js 26 support.** `engines.node` now includes `^26`. Homebridge 2.5.0 supports
+  Node 26, and Homebridge UI flagged the plugin as incompatible because the range stopped at
+  `^24`. The plugin was already running on Node v26.13.0 under Homebridge; only the declared
+  range changed, no code.
+
 ## [2.1.2] - 2026-11-07
 
 HKSV recording leaked FFmpeg processes until Homebridge ran out of memory. Found on a
